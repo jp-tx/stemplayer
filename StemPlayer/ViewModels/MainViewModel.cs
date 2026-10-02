@@ -78,8 +78,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
             string Fmt(double seconds)
             {
-                var idx = NearestBeatIndex(t, seconds);
-                var bb = idx == null ? null : BarBeatFor(t, idx.Value);
+                var bb = BarBeatForTime(t, seconds);
                 if (bb == null) return "—";
                 return SplitBar ? $"Bar {bb.Value.Bar}, Beat {bb.Value.Beat}" : $"Bar {bb.Value.Bar}";
             }
@@ -87,52 +86,57 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    static int? NearestBeatIndex(Track t, double seconds)
+    /// <summary>The segment whose own bar grid is closest to a given time - used to anchor labeling/
+    /// shifting for a point that may fall outside every segment (near a stop, or beyond the first/last
+    /// detected beat entirely).</summary>
+    static BeatSegment? NearestSegment(Track t, double seconds)
     {
-        if (t.BeatsMs.Count == 0) return null;
-        double targetMs = seconds * 1000;
-        int best = 0; double bestD = double.MaxValue;
-        for (int i = 0; i < t.BeatsMs.Count; i++)
+        if (t.Segments.Count == 0) return null;
+        BeatSegment best = t.Segments[0]; double bestD = double.MaxValue;
+        foreach (var seg in t.Segments)
         {
-            double d = Math.Abs(t.BeatsMs[i] - targetMs);
-            if (d < bestD) { bestD = d; best = i; }
+            double segStart = t.BeatsMs[seg.StartBeatIndex] / 1000.0;
+            double segEnd = t.BeatsMs[seg.EndBeatIndex - 1] / 1000.0;
+            double d = seconds < segStart ? segStart - seconds : seconds > segEnd ? seconds - segEnd : 0;
+            if (d < bestD) { bestD = d; best = seg; }
         }
         return best;
     }
 
-    /// <summary>1-based bar and beat-within-bar for a beat index, or null if it falls outside every
-    /// segment (near a stop, or in a run too short/unreliable to trust a phase from).</summary>
-    static (int Bar, int Beat)? BarBeatFor(Track t, int beatIndex)
+    /// <summary>1-based bar and beat-within-bar for any time in the track, extrapolated from the
+    /// nearest segment's own downbeat phase using the measured tempo - this is what makes a negative
+    /// bar (before the first detected beat, e.g. a silent intro) or "last bar + N" (past the last
+    /// detected beat, e.g. a fade-out) a well-defined position instead of just undefined space.</summary>
+    static (int Bar, int Beat)? BarBeatForTime(Track t, double seconds)
     {
-        foreach (var seg in t.Segments)
-        {
-            if (beatIndex < seg.StartBeatIndex || beatIndex >= seg.EndBeatIndex) continue;
-            int rel = beatIndex - seg.StartBeatIndex - seg.DownbeatOffset;
-            int bar = (int)Math.Floor(rel / (double)t.BeatsPerBar) + 1;
-            int beat = ((rel % t.BeatsPerBar) + t.BeatsPerBar) % t.BeatsPerBar + 1;
-            return (bar, beat);
-        }
-        return null;
+        if (NearestSegment(t, seconds) is not { } seg || t.Tempo <= 0) return null;
+        double refTime = t.BeatsMs[seg.StartBeatIndex + seg.DownbeatOffset] / 1000.0;
+        double beatSeconds = 60.0 / t.Tempo;
+        int rel = (int)Math.Round((seconds - refTime) / beatSeconds);
+        int bar = (int)Math.Floor(rel / (double)t.BeatsPerBar) + 1;
+        int beat = ((rel % t.BeatsPerBar) + t.BeatsPerBar) % t.BeatsPerBar + 1;
+        return (bar, beat);
     }
 
-    /// <summary>Shifts which beat counts as "1" for whichever segment contains the current loop
+    /// <summary>Shifts which beat counts as "1" for whichever segment is nearest the current loop
     /// selection (or the whole track's first segment if no selection), correcting a detector phase
-    /// error. The loop selection itself moves by one beat in the same direction so "bar 1" (or
-    /// whichever bar was selected) keeps tracking the same bar under the corrected grid - the
-    /// underlying beat timestamps and audio are unaffected, only which beat each label refers to.</summary>
+    /// error. The loop selection itself moves by exactly one tempo-beat in the same direction so
+    /// "bar 1" (or whichever bar was selected) keeps tracking the same bar under the corrected grid -
+    /// the underlying beat timestamps and audio are unaffected, only which beat each label refers to.</summary>
     [RelayCommand] void BeatShiftUp() => ShiftDownbeat(1);
     [RelayCommand] void BeatShiftDown() => ShiftDownbeat(-1);
 
     void ShiftDownbeat(int direction)
     {
-        if (NowPlaying?.Track is not { } t || t.Segments.Count == 0) return;
-        var anchor = LoopStartSeconds is { } s ? NearestBeatIndex(t, s) ?? t.Segments[0].StartBeatIndex : t.Segments[0].StartBeatIndex;
-        var seg = t.Segments.FirstOrDefault(sg => anchor >= sg.StartBeatIndex && anchor < sg.EndBeatIndex) ?? t.Segments[0];
+        if (NowPlaying?.Track is not { } t || t.Tempo <= 0) return;
+        var seg = (LoopStartSeconds is { } s ? NearestSegment(t, s) : null) ?? t.Segments.FirstOrDefault();
+        if (seg == null) return;
         seg.DownbeatOffset = ((seg.DownbeatOffset + direction) % t.BeatsPerBar + t.BeatsPerBar) % t.BeatsPerBar;
         _library.Save();
 
-        LoopStartSeconds = ShiftedBeatTime(t, LoopStartSeconds, direction);
-        LoopEndSeconds = ShiftedBeatTime(t, LoopEndSeconds, direction);
+        double beatSeconds = 60.0 / t.Tempo;
+        if (LoopStartSeconds is { } s0) LoopStartSeconds = s0 + direction * beatSeconds;
+        if (LoopEndSeconds is { } e0) LoopEndSeconds = e0 + direction * beatSeconds;
 
         OnPropertyChanged(nameof(LoopSelectionText));
         LoopGridChanged?.Invoke();
@@ -149,13 +153,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _output.Seek((long)(s * StemMixer.SampleRate));
             Position = s;
         }
-    }
-
-    static double? ShiftedBeatTime(Track t, double? seconds, int direction)
-    {
-        if (seconds is not { } s || NearestBeatIndex(t, s) is not { } idx) return seconds;
-        int newIdx = Math.Clamp(idx + direction, 0, t.BeatsMs.Count - 1);
-        return t.BeatsMs[newIdx] / 1000.0;
     }
 
     /// <summary>Raised whenever the view needs to redraw the loop timeline (grid shifted, selection

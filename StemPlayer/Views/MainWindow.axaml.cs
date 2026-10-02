@@ -129,30 +129,30 @@ public partial class MainWindow : Window
         if (Vm?.NowPlaying?.Track is not { } t || Vm.Duration <= 0 || LoopCanvas.Bounds.Width <= 0) return null;
         double frac = Math.Clamp(x / LoopCanvas.Bounds.Width, 0, 1);
         double seconds = frac * Vm.Duration;
-        if (Vm.LoopByTime || t.BeatsMs.Count == 0) return seconds;
+        if (Vm.LoopByTime) return seconds;
 
-        double targetMs = seconds * 1000.0;
-        int nearest = 0; double best = double.MaxValue;
-        for (int i = 0; i < t.BeatsMs.Count; i++)
-        {
-            double d = Math.Abs(t.BeatsMs[i] - targetMs);
-            if (d < best) { best = d; nearest = i; }
-        }
-        if (!Vm.SplitBar)
-        {
-            var bars = BarBoundaries(t);
-            if (bars.Count > 0) nearest = bars.OrderBy(b => Math.Abs(b - nearest)).First();
-        }
-        return t.BeatsMs[nearest] / 1000.0;
+        var grid = GridSeconds(t, Vm.Duration, byBar: !Vm.SplitBar);
+        return grid.Count == 0 ? seconds : grid.OrderBy(g => Math.Abs(g - seconds)).First();
     }
 
-    static List<int> BarBoundaries(Track t)
+    /// <summary>Every bar (or beat) boundary across the WHOLE track, not just inside the detected
+    /// segment: extrapolated forward/backward from the segment's own downbeat phase using the
+    /// measured tempo. This is what makes a negative bar (before a silent intro with no detected
+    /// beats) or "last bar + N" (past a fade-out) a real, draggable position - the detector's
+    /// confidence region isn't a hard boundary on where a loop can start or end.</summary>
+    static List<double> GridSeconds(Track t, double duration, bool byBar)
     {
-        var list = new List<int>();
-        foreach (var seg in t.Segments)
-            for (int i = seg.StartBeatIndex + seg.DownbeatOffset; i < seg.EndBeatIndex; i += t.BeatsPerBar)
-                list.Add(i);
-        return list;
+        var result = new List<double>();
+        if (t.Segments.Count == 0 || t.Tempo <= 0 || t.BeatsMs.Count == 0) return result;
+        var seg = t.Segments[0];
+        double refTime = t.BeatsMs[seg.StartBeatIndex + seg.DownbeatOffset] / 1000.0;
+        double step = 60.0 / t.Tempo * (byBar ? t.BeatsPerBar : 1);
+        if (step <= 0) return result;
+
+        for (double time = refTime; time >= 0; time -= step) result.Add(time);
+        for (double time = refTime + step; time <= duration; time += step) result.Add(time);
+        result.Sort();
+        return result;
     }
 
     void RedrawLoop()
@@ -163,18 +163,17 @@ public partial class MainWindow : Window
         double width = LoopCanvas.Bounds.Width, height = LoopCanvas.Bounds.Height;
         if (t == null || duration <= 0 || width <= 0) return;
 
-        double XFor(long ms) => Math.Clamp(ms / 1000.0 / duration, 0, 1) * width;
+        double XFor(double seconds) => Math.Clamp(seconds / duration, 0, 1) * width;
 
-        foreach (var seg in t.Segments)
-            for (int i = seg.StartBeatIndex + seg.DownbeatOffset; i < seg.EndBeatIndex; i += t.BeatsPerBar)
-                LoopCanvas.Children.Add(new Line
-                {
-                    StartPoint = new Point(XFor(t.BeatsMs[i]), 0),
-                    EndPoint = new Point(XFor(t.BeatsMs[i]), height),
-                    Stroke = Brushes.Gray,
-                    StrokeThickness = 1,
-                    Opacity = 0.5,
-                });
+        foreach (var time in GridSeconds(t, duration, byBar: true))
+            LoopCanvas.Children.Add(new Line
+            {
+                StartPoint = new Point(XFor(time), 0),
+                EndPoint = new Point(XFor(time), height),
+                Stroke = Brushes.Gray,
+                StrokeThickness = 1,
+                Opacity = 0.5,
+            });
 
         if (Vm!.LoopStartSeconds is { } s && Vm.LoopEndSeconds is { } en)
         {
