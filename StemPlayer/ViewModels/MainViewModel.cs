@@ -63,7 +63,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         _timer.Start();
         Reload();
         CheckSetup();
+        StartBeatBackfill();
     }
+
+    /// <summary>Fills in beat timestamps for already-split tracks that don't have them yet. Fire-and-forget;
+    /// quiet, best-effort, and shares the import gate so it never competes with an active import for CPU.</summary>
+    void StartBeatBackfill() => _ = _importer.BackfillBeatsAsync();
 
     (Library, PythonEnv, ImportService) Build()
     {
@@ -93,6 +98,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         (_library, _env, _importer) = Build();
         Reload();
         CheckSetup();
+        StartBeatBackfill();
     }
 
     void Reload()

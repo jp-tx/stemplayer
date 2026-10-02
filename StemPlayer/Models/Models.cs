@@ -25,6 +25,10 @@ public class Track
 
     /// <summary>Stem role (vocals, drums, bass, guitar, piano, other, instrumental) to file name inside the track folder.</summary>
     public Dictionary<string, string> Stems { get; set; } = new();
+
+    /// <summary>Beat timestamps in milliseconds from track start, detected via librosa. Internal use only
+    /// (not shown in the UI yet) — empty if detection failed or hasn't run for this track.</summary>
+    public List<long> BeatsMs { get; set; } = new();
 }
 
 public class AppSettings

@@ -23,6 +23,7 @@ public class ImportService
     readonly PythonEnv _env;
     readonly SeparatorService _separator;
     readonly YouTubeService _youtube;
+    readonly BeatDetectionService _beats;
     readonly SplitCache _cache;
     readonly SemaphoreSlim _gate;
 
@@ -38,6 +39,7 @@ public class ImportService
         _library = library; _settings = settings; _env = env;
         _separator = new SeparatorService(env, settings);
         _youtube = new YouTubeService(env);
+        _beats = new BeatDetectionService(env);
         _cache = new SplitCache();
         _gate = new SemaphoreSlim(Math.Max(1, settings.MaxConcurrentImports));
     }
@@ -87,6 +89,9 @@ public class ImportService
             p => Set(item, stage, baseline + p * (1 - baseline)),
             s => { stage = s; Set(item, s, null, indeterminate: s != "Separating"); },
             l => LogLine?.Invoke(l), ct);
+
+        Set(item, "Detecting beats", 0.98, indeterminate: true);
+        track.BeatsMs = await _beats.DetectAsync(source, l => LogLine?.Invoke(l), ct);
     }
 
     async Task Run(ImportItemViewModel item, Func<CancellationToken, Task<string>> keyFor, Func<Track, string, CancellationToken, Task> body)
@@ -180,6 +185,26 @@ public class ImportService
         foreach (var f in Directory.EnumerateFiles(dir, "*.wav"))
             track.Stems[Path.GetFileNameWithoutExtension(f)] = Path.GetFileName(f);
         return track;
+    }
+
+    /// <summary>Fills in beat timestamps for any already-split tracks that don't have them yet (imported
+    /// before this feature existed, or reused from an orphaned folder). Runs quietly in the background,
+    /// one track at a time sharing the same import gate; safe to call once at startup.</summary>
+    public async Task BackfillBeatsAsync(CancellationToken ct = default)
+    {
+        foreach (var track in _library.Tracks.ToList())
+        {
+            if (ct.IsCancellationRequested) return;
+            if (track.BeatsMs.Count > 0) continue;
+            var dir = _library.TrackDir(track);
+            var source = Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "source.*").FirstOrDefault() : null;
+            if (source == null) continue;
+
+            await _gate.WaitAsync(ct);
+            try { track.BeatsMs = await _beats.DetectAsync(source, l => LogLine?.Invoke(l), ct); }
+            finally { _gate.Release(); }
+            if (track.BeatsMs.Count > 0) _library.Save();
+        }
     }
 
     static void Set(ImportItemViewModel item, string stage, double? progress, bool indeterminate = false) =>
