@@ -23,7 +23,7 @@ pick the CPU / NVIDIA CUDA / DirectML variant). Large download (several GB with 
 ## Features
 - Import files or a YouTube link (downloaded as MP3 via yt-dlp), per-song progress bars.
 - Stems stored in `~/Music/StemPlayer/<id>/*.wav` (change in Options).
-- Faders: Vocals, Keys, Guitar, Bass, Everything else (drums + other), each with mute/solo; master volume; seek.
+- Faders: Vocals, Drums, Bass, Guitar, Keys, Everything else (non-separated leftover), each with mute/solo; master volume; seek.
 - Options: algorithm (Demucs 6-stem / 4-stem, BS-Roformer, MDX-Net, or any model filename), CPU or GPU.
 
 - **⬆ Update** button: downloads the newest GitHub release (SHA-256 verified) over the installed executable, then offers a restart.

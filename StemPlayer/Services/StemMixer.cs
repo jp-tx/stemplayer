@@ -15,6 +15,7 @@ public sealed class StemMixer : IDisposable
 {
     public const int SampleRate = 44100;
     public const int Channels = 2;
+    static readonly int GroupCount = Enum.GetValues<StemGroup>().Length;
 
     sealed class Source
     {
@@ -25,11 +26,11 @@ public sealed class StemMixer : IDisposable
     }
 
     readonly List<Source> _sources = new();
-    readonly float[] _target = new float[5];
-    readonly float[] _current = new float[5];
+    readonly float[] _target;
+    readonly float[] _current;
     readonly object _lock = new();
-    readonly bool[] _mute = new bool[5];
-    readonly bool[] _solo = new bool[5];
+    readonly bool[] _mute;
+    readonly bool[] _solo;
 
     public long TotalFrames { get; private set; }
     public long PositionFrames { get; private set; }
@@ -38,16 +39,21 @@ public sealed class StemMixer : IDisposable
     public static StemGroup? GroupFor(string role) => role.ToLowerInvariant() switch
     {
         "vocals" => StemGroup.Vocals,
+        "drums" => StemGroup.Drums,
         "bass" => StemGroup.Bass,
         "guitar" => StemGroup.Guitar,
         "piano" or "keys" => StemGroup.Keys,
-        "drums" or "other" or "instrumental" => StemGroup.Other,
+        "other" or "instrumental" => StemGroup.Other,
         _ => StemGroup.Other,
     };
 
     public StemMixer(string trackDir, Track track)
     {
-        for (int i = 0; i < 5; i++) _target[i] = _current[i] = 1f;
+        _target = new float[GroupCount];
+        _current = new float[GroupCount];
+        _mute = new bool[GroupCount];
+        _solo = new bool[GroupCount];
+        for (int i = 0; i < GroupCount; i++) _target[i] = _current[i] = 1f;
         foreach (var (role, file) in track.Stems)
         {
             var path = Path.Combine(trackDir, file);
@@ -90,8 +96,8 @@ public sealed class StemMixer : IDisposable
         {
             Array.Clear(dest, 0, count);
             int maxRead = 0;
-            var tgt = new float[5];
-            for (int g = 0; g < 5; g++) tgt[g] = EffectiveTarget(g);
+            var tgt = new float[GroupCount];
+            for (int g = 0; g < GroupCount; g++) tgt[g] = EffectiveTarget(g);
             int frames = count / Channels;
 
             foreach (var s in _sources)
@@ -111,7 +117,7 @@ public sealed class StemMixer : IDisposable
                 }
             }
             // Advance each group's gain once per block (after all of its sources used the same ramp).
-            for (int g = 0; g < 5; g++) _current[g] = tgt[g];
+            for (int g = 0; g < GroupCount; g++) _current[g] = tgt[g];
 
             PositionFrames += maxRead / Channels;
             return maxRead;

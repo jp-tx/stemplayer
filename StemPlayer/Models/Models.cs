@@ -4,7 +4,7 @@ using System.Collections.Generic;
 namespace StemPlayer.Models;
 
 /// <summary>The five faders shown in the player.</summary>
-public enum StemGroup { Vocals, Keys, Guitar, Bass, Other }
+public enum StemGroup { Vocals, Drums, Keys, Guitar, Bass, Other }
 
 public enum DeviceMode { Gpu, Cpu }
 

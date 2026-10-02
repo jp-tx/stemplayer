@@ -30,10 +30,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public StemFaderViewModel[] Faders { get; } =
     {
         new(StemGroup.Vocals, "Vocals", "🎤"),
-        new(StemGroup.Keys, "Keys", "🎹"),
-        new(StemGroup.Guitar, "Guitar", "🎸"),
+        new(StemGroup.Drums, "Drums", "🥁"),
         new(StemGroup.Bass, "Bass", "🎻"),
-        new(StemGroup.Other, "Everything else", "🥁"),
+        new(StemGroup.Guitar, "Guitar", "🎸"),
+        new(StemGroup.Keys, "Keys", "🎹"),
+        new(StemGroup.Other, "Everything else", "🎶"),
     };
 
     [ObservableProperty] public partial TrackItemViewModel? SelectedTrack { get; set; }
