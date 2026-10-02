@@ -112,6 +112,7 @@ public partial class MainWindow : Window
         // Dragged one handle past the other - swap so Start is always the earlier of the two.
         if (Vm != null && Vm.LoopStartSeconds > Vm.LoopEndSeconds)
             (Vm.LoopStartSeconds, Vm.LoopEndSeconds) = (Vm.LoopEndSeconds, Vm.LoopStartSeconds);
+        Vm?.ApplyLoopEditNow();
         RedrawLoop();
     }
 

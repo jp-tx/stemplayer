@@ -136,6 +136,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
         OnPropertyChanged(nameof(LoopSelectionText));
         LoopGridChanged?.Invoke();
+        ApplyLoopEditNow();
+    }
+
+    /// <summary>If the loop is enabled and actively playing, jump playback to the (possibly just-moved)
+    /// loop start right away instead of waiting for the old boundary to naturally come around again -
+    /// a loop edit should be felt immediately, not after the next wrap.</summary>
+    public void ApplyLoopEditNow()
+    {
+        if (LoopEnabled && IsPlaying && _output != null && LoopStartSeconds is { } s)
+        {
+            _output.Seek((long)(s * StemMixer.SampleRate));
+            Position = s;
+        }
     }
 
     static double? ShiftedBeatTime(Track t, double? seconds, int direction)
