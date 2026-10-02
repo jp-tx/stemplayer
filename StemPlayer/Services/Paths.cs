@@ -15,6 +15,7 @@ public static class Paths
     public static string Models => Directory.CreateDirectory(Path.Combine(AppData, "models")).FullName;
     public static string Runner => Path.Combine(AppData, "runner.py");
     public static string BeatDetectScript => Path.Combine(AppData, "beat_detect.py");
+    public static string StretchScript => Path.Combine(AppData, "stretch.py");
 
     public static string VenvPython => OperatingSystem.IsWindows()
         ? Path.Combine(Venv, "Scripts", "python.exe")

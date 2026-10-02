@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <Version>0.4.7</Version>
+    <Version>0.4.8</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
@@ -13,6 +13,7 @@
     <AvaloniaResource Include="Assets\**" Exclude="Assets\py\**" />
     <EmbeddedResource Include="Assets\py\runner.py" LogicalName="runner.py" />
     <EmbeddedResource Include="Assets\py\beat_detect.py" LogicalName="beat_detect.py" />
+    <EmbeddedResource Include="Assets\py\stretch.py" LogicalName="stretch.py" />
   </ItemGroup>
 
   <ItemGroup>

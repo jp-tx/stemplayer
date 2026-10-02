@@ -134,8 +134,14 @@
 
     <DockPanel Grid.Row="3" Margin="14,0,14,8">
       <Button DockPanel.Dock="Right" Content="Restart now" Command="{Binding RestartCommand}" IsVisible="{Binding RestartNeeded}" />
-      <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,8,0"
+      <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,4,0"
                  IsVisible="{Binding HasMeter}" />
+      <Button DockPanel.Dock="Left" Content="−" Command="{Binding TempoDownCommand}" Width="30" Margin="0,0,2,0"
+              IsVisible="{Binding HasMeter}" IsEnabled="{Binding !IsStretching}" ToolTip.Tip="Slow down 5 BPM (time-stretched, pitch unchanged)" />
+      <Button DockPanel.Dock="Left" Content="+" Command="{Binding TempoUpCommand}" Width="30" Margin="0,0,2,0"
+              IsVisible="{Binding HasMeter}" IsEnabled="{Binding !IsStretching}" ToolTip.Tip="Speed up 5 BPM (time-stretched, pitch unchanged)" />
+      <Button DockPanel.Dock="Left" Content="Reset" Command="{Binding TempoResetCommand}" Margin="0,0,16,0"
+              IsVisible="{Binding HasMeter}" IsEnabled="{Binding !IsStretching}" ToolTip.Tip="Back to the detected tempo" />
       <TextBlock DockPanel.Dock="Left" Text="Beat shift" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,4,0"
                  IsVisible="{Binding HasMeter}" />
       <Button DockPanel.Dock="Left" Content="−" Command="{Binding BeatShiftDownCommand}" Width="30" Margin="0,0,2,0"

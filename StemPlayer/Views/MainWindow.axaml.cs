@@ -131,7 +131,7 @@ public partial class MainWindow : Window
         double seconds = frac * Vm.Duration;
         if (Vm.LoopByTime) return seconds;
 
-        var grid = GridSeconds(t, Vm.Duration, byBar: !Vm.SplitBar);
+        var grid = GridSeconds(t, Vm.Duration, byBar: !Vm.SplitBar, Vm.TempoFactor);
         return grid.Count == 0 ? seconds : grid.OrderBy(g => Math.Abs(g - seconds)).First();
     }
 
@@ -139,8 +139,10 @@ public partial class MainWindow : Window
     /// segment: extrapolated forward/backward from the segment's own downbeat phase using the
     /// measured tempo. This is what makes a negative bar (before a silent intro with no detected
     /// beats) or "last bar + N" (past a fade-out) a real, draggable position - the detector's
-    /// confidence region isn't a hard boundary on where a loop can start or end.</summary>
-    static List<double> GridSeconds(Track t, double duration, bool byBar)
+    /// confidence region isn't a hard boundary on where a loop can start or end. The grid itself is
+    /// computed in the track's ORIGINAL time and divided by tempoFactor at the end to land in
+    /// whichever timeline is actually playing (1.0 = unstretched).</summary>
+    static List<double> GridSeconds(Track t, double duration, bool byBar, double tempoFactor)
     {
         var result = new List<double>();
         if (t.Segments.Count == 0 || t.Tempo <= 0 || t.BeatsMs.Count == 0) return result;
@@ -149,8 +151,9 @@ public partial class MainWindow : Window
         double step = 60.0 / t.Tempo * (byBar ? t.BeatsPerBar : 1);
         if (step <= 0) return result;
 
-        for (double time = refTime; time >= 0; time -= step) result.Add(time);
-        for (double time = refTime + step; time <= duration; time += step) result.Add(time);
+        double originalDuration = duration * tempoFactor;
+        for (double time = refTime; time >= 0; time -= step) result.Add(time / tempoFactor);
+        for (double time = refTime + step; time <= originalDuration; time += step) result.Add(time / tempoFactor);
         result.Sort();
         return result;
     }
@@ -165,7 +168,7 @@ public partial class MainWindow : Window
 
         double XFor(double seconds) => Math.Clamp(seconds / duration, 0, 1) * width;
 
-        foreach (var time in GridSeconds(t, duration, byBar: true))
+        foreach (var time in GridSeconds(t, duration, byBar: true, Vm!.TempoFactor))
             LoopCanvas.Children.Add(new Line
             {
                 StartPoint = new Point(XFor(time), 0),
