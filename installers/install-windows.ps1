@@ -6,6 +6,7 @@ $ErrorActionPreference = 'Stop'
 
 $Repo    = 'jp-tx/stemplayer'
 $Asset   = 'StemPlayer-win-x64.exe'
+$Native  = 'soft_oal.dll'   # OpenAL native lib; must sit beside the exe or audio playback fails
 $Here    = Split-Path -Parent $MyInvocation.MyCommand.Path
 $Desktop = [Environment]::GetFolderPath('Desktop')
 $Config  = Join-Path $env:APPDATA 'StemPlayer'     # where the app looks for its venv
@@ -49,5 +50,10 @@ $Dest = Join-Path $Desktop 'StemPlayer.exe'
 $Local = Join-Path $Here $Asset
 if (Test-Path $Local) { Copy-Item $Local $Dest -Force }
 else { Invoke-WebRequest "https://github.com/$Repo/releases/latest/download/$Asset" -OutFile $Dest }
+
+$NativeDest = Join-Path $Desktop $Native
+$NativeLocal = Join-Path $Here $Native
+if (Test-Path $NativeLocal) { Copy-Item $NativeLocal $NativeDest -Force }
+else { Invoke-WebRequest "https://github.com/$Repo/releases/latest/download/$Native" -OutFile $NativeDest }
 
 Say 'Done. Launch StemPlayer from your Desktop.'

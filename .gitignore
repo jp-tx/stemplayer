@@ -4,3 +4,4 @@ obj/
 *.user
 publish/
 publish-win-x64/
+release-assets/

@@ -3,7 +3,7 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
-    <Version>0.2.1</Version>
+    <Version>0.2.2</Version>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <ApplicationManifest>app.manifest</ApplicationManifest>
   </PropertyGroup>
@@ -29,4 +29,21 @@
     <PackageReference Include="Silk.NET.OpenAL.Soft.Native" Version="1.23.1" />
     <PackageReference Include="TagLibSharp" Version="2.3.0" />
   </ItemGroup>
+
+  <!--
+    Silk.NET's native loader only probes next to the executable (and a couple of other real paths);
+    it does not know how to find a library extracted from inside a PublishSingleFile bundle. Keep
+    the OpenAL Soft native library as a loose file alongside the single-file exe on every platform
+    so OpenAL playback actually works (confirmed broken on Windows before this fix).
+  -->
+  <Target Name="KeepOpenAlSoftLoose" AfterTargets="ComputeResolvedFilesToPublishList" BeforeTargets="GenerateSingleFileBundle">
+    <ItemGroup>
+      <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
+          Condition="'%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'soft_oal.dll'
+                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libsoft_oal.so'
+                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libsoft_oal.dylib'">
+        <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
+      </ResolvedFileToPublish>
+    </ItemGroup>
+  </Target>
 </Project>
