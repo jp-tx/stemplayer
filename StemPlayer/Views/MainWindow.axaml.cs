@@ -88,20 +88,19 @@ public partial class MainWindow : Window
 
     void OnLoopPointerPressed(object? sender, PointerPressedEventArgs e)
     {
-        var t = Vm?.NowPlaying?.Track;
-        if (t == null || Vm!.LoopStartBeat is not { } s || Vm.LoopEndBeat is not { } en) return;
+        if (Vm?.NowPlaying?.Track == null || Vm.LoopStartSeconds is not { } s || Vm.LoopEndSeconds is not { } en) return;
         double x = e.GetPosition(LoopCanvas).X;
-        _dragging = Math.Abs(x - XForBeat(t, s)) <= Math.Abs(x - XForBeat(t, en)) ? LoopHandle.Start : LoopHandle.End;
+        _dragging = Math.Abs(x - XForSeconds(s)) <= Math.Abs(x - XForSeconds(en)) ? LoopHandle.Start : LoopHandle.End;
         e.Pointer.Capture(LoopCanvas);
     }
 
     void OnLoopPointerMoved(object? sender, PointerEventArgs e)
     {
         if (_dragging == LoopHandle.None || Vm?.NowPlaying?.Track == null) return;
-        var idx = BeatIndexAtX(e.GetPosition(LoopCanvas).X);
-        if (idx == null) return;
-        if (_dragging == LoopHandle.Start) Vm.LoopStartBeat = idx;
-        else Vm.LoopEndBeat = idx;
+        var seconds = SecondsAtX(e.GetPosition(LoopCanvas).X);
+        if (seconds == null) return;
+        if (_dragging == LoopHandle.Start) Vm.LoopStartSeconds = seconds;
+        else Vm.LoopEndSeconds = seconds;
         RedrawLoop();
     }
 
@@ -111,34 +110,39 @@ public partial class MainWindow : Window
         _dragging = LoopHandle.None;
         e.Pointer.Capture(null);
         // Dragged one handle past the other - swap so Start is always the earlier of the two.
-        if (Vm != null && Vm.LoopStartBeat > Vm.LoopEndBeat)
-            (Vm.LoopStartBeat, Vm.LoopEndBeat) = (Vm.LoopEndBeat, Vm.LoopStartBeat);
+        if (Vm != null && Vm.LoopStartSeconds > Vm.LoopEndSeconds)
+            (Vm.LoopStartSeconds, Vm.LoopEndSeconds) = (Vm.LoopEndSeconds, Vm.LoopStartSeconds);
         RedrawLoop();
     }
 
-    double XForBeat(Track t, int beatIndex)
+    double XForSeconds(double seconds)
     {
         var duration = Math.Max(Vm?.Duration ?? 0, 0.001);
-        return Math.Clamp(t.BeatsMs[beatIndex] / 1000.0 / duration, 0, 1) * LoopCanvas.Bounds.Width;
+        return Math.Clamp(seconds / duration, 0, 1) * LoopCanvas.Bounds.Width;
     }
 
-    int? BeatIndexAtX(double x)
+    /// <summary>The time a pixel X corresponds to, snapped to the nearest beat or bar unless LoopByTime
+    /// is on (free, unsnapped dragging).</summary>
+    double? SecondsAtX(double x)
     {
-        var t = Vm?.NowPlaying?.Track;
-        if (t == null || t.BeatsMs.Count == 0 || Vm!.Duration <= 0 || LoopCanvas.Bounds.Width <= 0) return null;
+        if (Vm?.NowPlaying?.Track is not { } t || Vm.Duration <= 0 || LoopCanvas.Bounds.Width <= 0) return null;
         double frac = Math.Clamp(x / LoopCanvas.Bounds.Width, 0, 1);
-        double targetMs = frac * Vm.Duration * 1000.0;
+        double seconds = frac * Vm.Duration;
+        if (Vm.LoopByTime || t.BeatsMs.Count == 0) return seconds;
 
+        double targetMs = seconds * 1000.0;
         int nearest = 0; double best = double.MaxValue;
         for (int i = 0; i < t.BeatsMs.Count; i++)
         {
             double d = Math.Abs(t.BeatsMs[i] - targetMs);
             if (d < best) { best = d; nearest = i; }
         }
-        if (Vm.SplitBar) return nearest;
-
-        var bars = BarBoundaries(t);
-        return bars.Count == 0 ? nearest : bars.OrderBy(b => Math.Abs(b - nearest)).First();
+        if (!Vm.SplitBar)
+        {
+            var bars = BarBoundaries(t);
+            if (bars.Count > 0) nearest = bars.OrderBy(b => Math.Abs(b - nearest)).First();
+        }
+        return t.BeatsMs[nearest] / 1000.0;
     }
 
     static List<int> BarBoundaries(Track t)
@@ -156,7 +160,7 @@ public partial class MainWindow : Window
         var t = Vm?.NowPlaying?.Track;
         double duration = Vm?.Duration ?? 0;
         double width = LoopCanvas.Bounds.Width, height = LoopCanvas.Bounds.Height;
-        if (t == null || duration <= 0 || width <= 0 || t.BeatsMs.Count == 0) return;
+        if (t == null || duration <= 0 || width <= 0) return;
 
         double XFor(long ms) => Math.Clamp(ms / 1000.0 / duration, 0, 1) * width;
 
@@ -171,12 +175,14 @@ public partial class MainWindow : Window
                     Opacity = 0.5,
                 });
 
-        if (Vm!.LoopStartBeat is { } s && Vm.LoopEndBeat is { } en && s < t.BeatsMs.Count && en < t.BeatsMs.Count)
+        if (Vm!.LoopStartSeconds is { } s && Vm.LoopEndSeconds is { } en)
         {
-            double xs = XFor(t.BeatsMs[s]), xe = XFor(t.BeatsMs[en]);
+            double xs = XForSeconds(s), xe = XForSeconds(en);
             var (lo, hi) = (Math.Min(xs, xe), Math.Max(xs, xe));
+            // Dimmer when the loop isn't actually enabled, so it reads as "selected" vs "active".
+            double fillOpacity = Vm.LoopEnabled ? 0.35 : 0.15;
 
-            var fill = new Rectangle { Width = Math.Max(2, hi - lo), Height = height, Fill = new SolidColorBrush(Colors.CornflowerBlue, 0.35) };
+            var fill = new Rectangle { Width = Math.Max(2, hi - lo), Height = height, Fill = new SolidColorBrush(Colors.CornflowerBlue, fillOpacity) };
             Canvas.SetLeft(fill, lo); Canvas.SetTop(fill, 0);
             LoopCanvas.Children.Add(fill);
 

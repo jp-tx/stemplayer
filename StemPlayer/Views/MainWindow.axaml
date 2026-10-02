@@ -95,12 +95,17 @@
         </Grid>
 
         <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
-          <TextBlock Text="Loop" VerticalAlignment="Center" FontWeight="SemiBold" />
+          <CheckBox Grid.Column="0" Content="Loop" IsChecked="{Binding LoopEnabled}" VerticalAlignment="Center"
+                    ToolTip.Tip="Repeat the selected region during playback" />
           <Canvas Grid.Column="1" x:Name="LoopCanvas" Height="28" Background="#15808080" ClipToBounds="True"
                   PointerPressed="OnLoopPointerPressed" PointerMoved="OnLoopPointerMoved"
                   PointerReleased="OnLoopPointerReleased" />
-          <CheckBox Grid.Column="2" Content="Split bar" IsChecked="{Binding SplitBar}" VerticalAlignment="Center"
-                     ToolTip.Tip="Snap the loop handles to individual beats instead of whole bars" />
+          <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="8">
+            <CheckBox Content="Split bar" IsChecked="{Binding SplitBar}" VerticalAlignment="Center"
+                      ToolTip.Tip="Snap the loop handles to individual beats instead of whole bars" />
+            <CheckBox Content="By time" IsChecked="{Binding LoopByTime}" VerticalAlignment="Center"
+                      ToolTip.Tip="Drag the loop freely by time instead of snapping to the beat grid" />
+          </StackPanel>
         </Grid>
         <TextBlock Text="{Binding LoopSelectionText}" Opacity="0.75" HorizontalAlignment="Center" FontFamily="monospace" />
 
@@ -131,9 +136,12 @@
       <Button DockPanel.Dock="Right" Content="Restart now" Command="{Binding RestartCommand}" IsVisible="{Binding RestartNeeded}" />
       <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,8,0"
                  IsVisible="{Binding HasMeter}" />
-      <Button DockPanel.Dock="Left" Content="Beat shift" Command="{Binding BeatShiftCommand}" Margin="0,0,16,0"
-              IsVisible="{Binding HasMeter}"
-              ToolTip.Tip="Nudge which beat counts as '1' if the detected downbeat looks off" />
+      <TextBlock DockPanel.Dock="Left" Text="Beat shift" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,4,0"
+                 IsVisible="{Binding HasMeter}" />
+      <Button DockPanel.Dock="Left" Content="−" Command="{Binding BeatShiftDownCommand}" Width="30" Margin="0,0,2,0"
+              IsVisible="{Binding HasMeter}" ToolTip.Tip="Shift the downbeat back by one beat" />
+      <Button DockPanel.Dock="Left" Content="+" Command="{Binding BeatShiftUpCommand}" Width="30" Margin="0,0,16,0"
+              IsVisible="{Binding HasMeter}" ToolTip.Tip="Shift the downbeat forward by one beat" />
       <TextBlock Text="{Binding Status}" Foreground="Orange" TextWrapping="Wrap" VerticalAlignment="Center" />
     </DockPanel>
   </Grid>
