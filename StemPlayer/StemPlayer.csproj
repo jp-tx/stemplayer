@@ -40,8 +40,8 @@
     <ItemGroup>
       <ResolvedFileToPublish Update="@(ResolvedFileToPublish)"
           Condition="'%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'soft_oal.dll'
-                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libsoft_oal.so'
-                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libsoft_oal.dylib'">
+                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libopenal.so'
+                  OR '%(ResolvedFileToPublish.FileName)%(ResolvedFileToPublish.Extension)' == 'libopenal.dylib'">
         <ExcludeFromSingleFile>true</ExcludeFromSingleFile>
       </ResolvedFileToPublish>
     </ItemGroup>

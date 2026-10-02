@@ -42,7 +42,7 @@ public class UpdateService
     public static string? NativeAssetName =>
         RuntimeInformation.ProcessArchitecture != Architecture.X64 ? null :
         OperatingSystem.IsWindows() ? "soft_oal.dll" :
-        OperatingSystem.IsLinux() ? "libsoft_oal.so" : null;
+        OperatingSystem.IsLinux() ? "libopenal.so" : null;
 
     /// <summary>Path of the installed single-file executable, or null when running from `dotnet run` / a dll.</summary>
     public static string? InstalledExe

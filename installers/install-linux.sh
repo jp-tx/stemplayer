@@ -6,6 +6,7 @@ set -euo pipefail
 
 REPO="jp-tx/stemplayer"
 ASSET="StemPlayer-linux-x64"
+NATIVE="libopenal.so"   # OpenAL native lib; must sit beside the binary or audio playback fails
 HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DESKTOP="$(xdg-user-dir DESKTOP 2>/dev/null || echo "$HOME/Desktop")"
 CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/StemPlayer"   # where the app looks for its venv
@@ -39,6 +40,9 @@ mkdir -p "$DESKTOP"
 if [ -f "$HERE/$ASSET" ]; then cp "$HERE/$ASSET" "$DESKTOP/StemPlayer"
 else curl -fL "https://github.com/$REPO/releases/latest/download/$ASSET" -o "$DESKTOP/StemPlayer"; fi
 chmod +x "$DESKTOP/StemPlayer"
+
+if [ -f "$HERE/$NATIVE" ]; then cp "$HERE/$NATIVE" "$DESKTOP/$NATIVE"
+else curl -fL "https://github.com/$REPO/releases/latest/download/$NATIVE" -o "$DESKTOP/$NATIVE"; fi
 
 cat > "$DESKTOP/StemPlayer.desktop" <<DESK
 [Desktop Entry]
