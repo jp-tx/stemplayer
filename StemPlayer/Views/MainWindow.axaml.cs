@@ -19,7 +19,16 @@ public partial class MainWindow : Window
         SeekSlider.AddHandler(PointerPressedEvent, (_, _) => Vm?.BeginSeek(), RoutingStrategies.Tunnel, handledEventsToo: true);
         SeekSlider.AddHandler(PointerReleasedEvent, (_, _) => Vm?.EndSeek(), RoutingStrategies.Tunnel, handledEventsToo: true);
         Closing += (_, _) => Vm?.Dispose();
+        // Track Shift for the fader "move all the others" gesture. Pointer events also carry modifiers, which
+        // keeps this correct if Shift was pressed while another control had focus.
+        AddHandler(KeyDownEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(KeyUpEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerPressedEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
+        AddHandler(PointerMovedEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
+        Deactivated += (_, _) => SetShift(KeyModifiers.None);
     }
+
+    void SetShift(KeyModifiers m) { if (Vm != null) Vm.ShiftHeld = m.HasFlag(KeyModifiers.Shift); }
 
     async void OnImportFiles(object? sender, RoutedEventArgs e)
     {

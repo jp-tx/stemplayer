@@ -26,6 +26,10 @@ pick the CPU / NVIDIA CUDA / DirectML variant). Large download (several GB with 
 - Faders: Vocals, Keys, Guitar, Bass, Everything else (drums + other), each with mute/solo; master volume; seek.
 - Options: algorithm (Demucs 6-stem / 4-stem, BS-Roformer, MDX-Net, or any model filename), CPU or GPU.
 
+- **⬆ Update** button: downloads the newest GitHub release (SHA-256 verified) over the installed executable, then offers a restart.
+  Only works from the installed binary, not `dotnet run`. Updates the app only, not the Python packages.
+- **Shift + drag a fader** moves every other fader by the same amount (clamped to 0-150%).
+
 ## Notes
 - Only the Demucs 6-stem model separates guitar and keys; other models leave those faders disabled.
 - GPU = whatever the Python packages support: NVIDIA (CUDA), AMD/Intel on Windows (DirectML variant),

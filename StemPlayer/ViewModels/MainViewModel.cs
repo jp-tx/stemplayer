@@ -53,7 +53,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         Settings = SettingsStore.Load();
         (_library, _env, _importer) = Build();
-        foreach (var f in Faders) f.Changed += ApplyFader;
+        foreach (var f in Faders) { f.Changed += ApplyFader; f.VolumeMoved += OnFaderMoved; }
+        UpdateService.CleanupOldVersion();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
         _timer.Tick += (_, _) => Tick();
         _timer.Start();
@@ -120,6 +121,46 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand] void CancelImport(ImportItemViewModel item) => item.Cts.Cancel();
     [RelayCommand] void DismissImport(ImportItemViewModel item) { item.Cts.Cancel(); Imports.Remove(item); }
     [RelayCommand] void ClearFinished() { foreach (var i in Imports.Where(i => i.Stage is "Done" or "Failed" or "Cancelled").ToList()) Imports.Remove(i); }
+
+    // ---------- updates ----------
+
+    [ObservableProperty] public partial bool IsUpdating { get; set; }
+    [ObservableProperty] public partial bool RestartNeeded { get; set; }
+
+    [RelayCommand]
+    async System.Threading.Tasks.Task Update()
+    {
+        if (IsUpdating) return;
+        IsUpdating = true;
+        try
+        {
+            var exe = UpdateService.InstalledExe;
+            if (exe == null) { Status = "Updating only works from the installed StemPlayer executable (not 'dotnet run')."; return; }
+            var svc = new UpdateService();
+            Status = "Checking for updates…";
+            var info = await svc.CheckAsync(UpdateService.CurrentVersion);
+            if (info == null) { Status = $"You're up to date (v{UpdateService.CurrentVersion.ToString(3)})."; return; }
+            var progress = new Progress<double>(p => Status = $"Downloading {info.Tag}… {p * 100:0}%");
+            await svc.ApplyAsync(info, exe, progress);
+            Status = $"Updated to {info.Tag}. Restart StemPlayer to use it.";
+            RestartNeeded = true;
+        }
+        catch (Exception e) { Status = "Update failed: " + e.Message; }
+        finally { IsUpdating = false; }
+    }
+
+    [RelayCommand]
+    void Restart()
+    {
+        var exe = UpdateService.InstalledExe;
+        if (exe == null) return;
+        try
+        {
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo(exe) { UseShellExecute = false });
+            (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.Shutdown();
+        }
+        catch (Exception e) { Status = "Could not restart: " + e.Message; }
+    }
 
     // ---------- library ----------
 
@@ -195,7 +236,25 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     void ResetFaders()
     {
-        foreach (var f in Faders) { f.Volume = 1; f.Mute = false; f.Solo = false; }
+        _propagating = true; // don't let a held Shift drag the other faders along
+        try { foreach (var f in Faders) { f.Volume = 1; f.Mute = false; f.Solo = false; } }
+        finally { _propagating = false; }
+    }
+
+    /// <summary>True while Shift is held (set by the window). Moving a fader then moves all the others by the same amount.</summary>
+    public bool ShiftHeld { get; set; }
+    bool _propagating;
+
+    void OnFaderMoved(StemFaderViewModel moved, double delta)
+    {
+        if (!ShiftHeld || _propagating || delta == 0) return;
+        _propagating = true;
+        try
+        {
+            foreach (var f in Faders)
+                if (f != moved && f.Available) f.Volume = Math.Clamp(f.Volume + delta, 0, 1.5);
+        }
+        finally { _propagating = false; }
     }
 
     void ApplyFader(StemFaderViewModel f)

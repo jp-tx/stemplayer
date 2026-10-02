@@ -8,12 +8,14 @@
   <Grid RowDefinitions="Auto,*,Auto,Auto">
 
     <!-- Toolbar -->
-    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="12" ColumnSpacing="8">
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto,Auto" Margin="12" ColumnSpacing="8">
       <Button Grid.Column="0" Content="＋ Import files…" Click="OnImportFiles" />
       <TextBox Grid.Column="1" PlaceholderText="Paste a YouTube link to import as MP3 and split…"
                Text="{Binding YouTubeUrl}" KeyDown="OnUrlKeyDown" />
       <Button Grid.Column="2" Content="Import from YouTube" Command="{Binding ImportYouTubeCommand}" />
-      <Button Grid.Column="3" Content="⚙ Options" Click="OnOptions" />
+      <Button Grid.Column="3" Content="⬆ Update" Command="{Binding UpdateCommand}" IsEnabled="{Binding !IsUpdating}"
+              ToolTip.Tip="Download and install the newest StemPlayer release" />
+      <Button Grid.Column="4" Content="⚙ Options" Click="OnOptions" />
     </Grid>
 
     <!-- Library + imports -->
@@ -115,6 +117,9 @@
       </StackPanel>
     </Border>
 
-    <TextBlock Grid.Row="3" Text="{Binding Status}" Margin="14,0,14,8" Foreground="Orange" TextWrapping="Wrap" />
+    <DockPanel Grid.Row="3" Margin="14,0,14,8">
+      <Button DockPanel.Dock="Right" Content="Restart now" Command="{Binding RestartCommand}" IsVisible="{Binding RestartNeeded}" />
+      <TextBlock Text="{Binding Status}" Foreground="Orange" TextWrapping="Wrap" VerticalAlignment="Center" />
+    </DockPanel>
   </Grid>
 </Window>
