@@ -1,0 +1,120 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:vm="using:StemPlayer.ViewModels"
+        x:Class="StemPlayer.Views.MainWindow"
+        x:DataType="vm:MainViewModel"
+        Title="StemPlayer" Width="1100" Height="780" MinWidth="820" MinHeight="600">
+
+  <Grid RowDefinitions="Auto,*,Auto,Auto">
+
+    <!-- Toolbar -->
+    <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto" Margin="12" ColumnSpacing="8">
+      <Button Grid.Column="0" Content="＋ Import files…" Click="OnImportFiles" />
+      <TextBox Grid.Column="1" PlaceholderText="Paste a YouTube link to import as MP3 and split…"
+               Text="{Binding YouTubeUrl}" KeyDown="OnUrlKeyDown" />
+      <Button Grid.Column="2" Content="Import from YouTube" Command="{Binding ImportYouTubeCommand}" />
+      <Button Grid.Column="3" Content="⚙ Options" Click="OnOptions" />
+    </Grid>
+
+    <!-- Library + imports -->
+    <Grid Grid.Row="1" RowDefinitions="*,Auto" Margin="12,0">
+      <ListBox Grid.Row="0" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}"
+               DoubleTapped="OnTrackDoubleTapped">
+        <ListBox.ItemTemplate>
+          <DataTemplate x:DataType="vm:TrackItemViewModel">
+            <Grid ColumnDefinitions="2*,*,*,60,80" Margin="2">
+              <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="1" Text="{Binding Artist}" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="2" Text="{Binding Album}" Opacity="0.75" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="3" Text="{Binding Duration}" Opacity="0.75" HorizontalAlignment="Right" />
+              <TextBlock Grid.Column="4" Text="{Binding Stems}" Opacity="0.5" HorizontalAlignment="Right" />
+            </Grid>
+          </DataTemplate>
+        </ListBox.ItemTemplate>
+        <ListBox.ContextMenu>
+          <ContextMenu>
+            <MenuItem Header="Play" Command="{Binding PlayTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
+            <MenuItem Header="Delete from library" Command="{Binding DeleteTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
+          </ContextMenu>
+        </ListBox.ContextMenu>
+      </ListBox>
+
+      <Border Grid.Row="1" IsVisible="{Binding Imports.Count}" Margin="0,8,0,0" Padding="8"
+              BorderThickness="1" BorderBrush="Gray" CornerRadius="4" MaxHeight="200">
+        <DockPanel>
+          <DockPanel DockPanel.Dock="Top">
+            <Button DockPanel.Dock="Right" Content="Clear finished" Command="{Binding ClearFinishedCommand}" />
+            <TextBlock Text="Imports" FontWeight="SemiBold" VerticalAlignment="Center" />
+          </DockPanel>
+          <ScrollViewer>
+            <ItemsControl ItemsSource="{Binding Imports}">
+              <ItemsControl.ItemTemplate>
+                <DataTemplate x:DataType="vm:ImportItemViewModel">
+                  <Grid RowDefinitions="Auto,Auto" ColumnDefinitions="2*,140,3*,50,Auto" Margin="0,4" ColumnSpacing="8">
+                    <TextBlock Grid.Column="0" Text="{Binding Title}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="1" Text="{Binding Stage}" Opacity="0.75" VerticalAlignment="Center" />
+                    <ProgressBar Grid.Column="2" Minimum="0" Maximum="1" Value="{Binding Progress}"
+                                 IsIndeterminate="{Binding IsIndeterminate}" VerticalAlignment="Center" />
+                    <TextBlock Grid.Column="3" Text="{Binding ProgressText}" HorizontalAlignment="Right" VerticalAlignment="Center" />
+                    <Button Grid.Column="4" Content="✕" Command="{Binding $parent[ItemsControl].((vm:MainViewModel)DataContext).DismissImportCommand}"
+                            CommandParameter="{Binding}" />
+                    <TextBlock Grid.Row="1" Grid.ColumnSpan="5" Text="{Binding Error}" Foreground="IndianRed"
+                               IsVisible="{Binding IsFailed}" TextWrapping="Wrap" />
+                  </Grid>
+                </DataTemplate>
+              </ItemsControl.ItemTemplate>
+            </ItemsControl>
+          </ScrollViewer>
+        </DockPanel>
+      </Border>
+    </Grid>
+
+    <!-- Player + faders -->
+    <Border Grid.Row="2" Margin="12" Padding="12" CornerRadius="8" BorderThickness="1" BorderBrush="Gray">
+      <StackPanel Spacing="10">
+        <Grid ColumnDefinitions="*,Auto,*">
+          <TextBlock Grid.Column="0" Text="{Binding NowPlayingText}" FontWeight="SemiBold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+          <StackPanel Grid.Column="1" Orientation="Horizontal" Spacing="8">
+            <Button Content="⏮" Command="{Binding PlayPreviousCommand}" />
+            <Button Content="{Binding PlayGlyph}" Command="{Binding TogglePlayCommand}" MinWidth="48" HorizontalContentAlignment="Center" />
+            <Button Content="⏭" Command="{Binding PlayNextCommand}" />
+          </StackPanel>
+          <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+            <TextBlock Text="Master" VerticalAlignment="Center" />
+            <Slider Minimum="0" Maximum="1" Value="{Binding MasterVolume}" Width="120" />
+            <Button Content="Reset faders" Command="{Binding ResetFadersCommand}" />
+          </StackPanel>
+        </Grid>
+
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+          <TextBlock Text="{Binding PositionText}" VerticalAlignment="Center" />
+          <Slider x:Name="SeekSlider" Grid.Column="1" Minimum="0" Maximum="{Binding Duration}" Value="{Binding Position}" />
+          <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" />
+        </Grid>
+
+        <ItemsControl ItemsSource="{Binding Faders}">
+          <ItemsControl.ItemsPanel>
+            <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
+          </ItemsControl.ItemsPanel>
+          <ItemsControl.ItemTemplate>
+            <DataTemplate x:DataType="vm:StemFaderViewModel">
+              <StackPanel Spacing="6" HorizontalAlignment="Center" IsEnabled="{Binding Available}">
+                <TextBlock Text="{Binding Icon}" FontSize="24" HorizontalAlignment="Center" />
+                <TextBlock Text="{Binding Name}" FontWeight="SemiBold" HorizontalAlignment="Center" />
+                <Slider Orientation="Vertical" Minimum="0" Maximum="1.5" Value="{Binding Volume}"
+                        Height="170" HorizontalAlignment="Center" TickFrequency="0.5" />
+                <TextBlock Text="{Binding VolumeText}" HorizontalAlignment="Center" Opacity="0.75" />
+                <StackPanel Orientation="Horizontal" Spacing="4" HorizontalAlignment="Center">
+                  <ToggleButton Content="M" IsChecked="{Binding Mute}" ToolTip.Tip="Mute" />
+                  <ToggleButton Content="S" IsChecked="{Binding Solo}" ToolTip.Tip="Solo" />
+                </StackPanel>
+              </StackPanel>
+            </DataTemplate>
+          </ItemsControl.ItemTemplate>
+        </ItemsControl>
+      </StackPanel>
+    </Border>
+
+    <TextBlock Grid.Row="3" Text="{Binding Status}" Margin="14,0,14,8" Foreground="Orange" TextWrapping="Wrap" />
+  </Grid>
+</Window>
