@@ -117,7 +117,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     /// <summary>Shifts which beat counts as "1" for whichever segment contains the current loop
     /// selection (or the whole track's first segment if no selection), correcting a detector phase
-    /// error. Only relabels bars/beats - the underlying beat timestamps and audio are unaffected.</summary>
+    /// error. The loop selection itself moves by one beat in the same direction so "bar 1" (or
+    /// whichever bar was selected) keeps tracking the same bar under the corrected grid - the
+    /// underlying beat timestamps and audio are unaffected, only which beat each label refers to.</summary>
     [RelayCommand] void BeatShiftUp() => ShiftDownbeat(1);
     [RelayCommand] void BeatShiftDown() => ShiftDownbeat(-1);
 
@@ -128,8 +130,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var seg = t.Segments.FirstOrDefault(sg => anchor >= sg.StartBeatIndex && anchor < sg.EndBeatIndex) ?? t.Segments[0];
         seg.DownbeatOffset = ((seg.DownbeatOffset + direction) % t.BeatsPerBar + t.BeatsPerBar) % t.BeatsPerBar;
         _library.Save();
+
+        LoopStartSeconds = ShiftedBeatTime(t, LoopStartSeconds, direction);
+        LoopEndSeconds = ShiftedBeatTime(t, LoopEndSeconds, direction);
+
         OnPropertyChanged(nameof(LoopSelectionText));
         LoopGridChanged?.Invoke();
+    }
+
+    static double? ShiftedBeatTime(Track t, double? seconds, int direction)
+    {
+        if (seconds is not { } s || NearestBeatIndex(t, s) is not { } idx) return seconds;
+        int newIdx = Math.Clamp(idx + direction, 0, t.BeatsMs.Count - 1);
+        return t.BeatsMs[newIdx] / 1000.0;
     }
 
     /// <summary>Raised whenever the view needs to redraw the loop timeline (grid shifted, selection
