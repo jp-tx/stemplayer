@@ -2,11 +2,13 @@ using System;
 using System.Collections.ObjectModel;
 using System.IO;
 using System.Linq;
+using System.Threading.Tasks;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using StemPlayer.Models;
 using StemPlayer.Services;
+using StemPlayer.Views;
 
 namespace StemPlayer.ViewModels;
 
@@ -69,8 +71,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var imp = new ImportService(lib, Settings, env);
         imp.TrackImported += t => Tracks.Add(new TrackItemViewModel(t));
         imp.LogLine += l => Dispatcher.UIThread.Post(() => { Log.Add(l); while (Log.Count > 500) Log.RemoveAt(0); });
+        imp.ResolveConflict = ResolveConflictAsync;
         return (lib, env, imp);
     }
+
+    static Avalonia.Controls.Window? MainWindow =>
+        (Avalonia.Application.Current?.ApplicationLifetime as Avalonia.Controls.ApplicationLifetimes.IClassicDesktopStyleApplicationLifetime)?.MainWindow;
+
+    static Task<ReuseDecision> ResolveConflictAsync(CacheConflict conflict) =>
+        Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            var win = new ReuseStemsWindow(conflict);
+            return MainWindow == null ? ReuseDecision.Resplit : await win.ShowDialog<ReuseDecision>(MainWindow);
+        });
 
     /// <summary>Called after the settings dialog closes so new paths/models take effect.</summary>
     public void SettingsChanged()
@@ -165,12 +178,18 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     // ---------- library ----------
 
     [RelayCommand]
-    void DeleteTrack(TrackItemViewModel? t)
+    async Task DeleteTrack(TrackItemViewModel? t)
     {
         t ??= SelectedTrack;
         if (t == null) return;
+
+        var win = new DeleteTrackWindow(t.Title);
+        var choice = MainWindow == null ? DeleteChoice.Cancel : await win.ShowDialog<DeleteChoice>(MainWindow);
+        if (choice == DeleteChoice.Cancel) return;
+
         if (NowPlaying == t) StopPlayback();
-        _library.Remove(t.Track);
+        if (choice == DeleteChoice.Everything) _library.Remove(t.Track);
+        else _library.RemoveEntryOnly(t.Track);
         Tracks.Remove(t);
     }
 

@@ -26,13 +26,17 @@ public class Library
         Tracks = Tracks.Where(t => Directory.Exists(TrackDir(t))).ToList();
     }
 
-    public string TrackDir(Track t) => Path.Combine(_libraryDir, t.Id);
+    public string TrackDir(Track t) => TrackDir(t.Id);
+    public string TrackDir(string trackId) => Path.Combine(_libraryDir, trackId);
 
     public void Add(Track t) { lock (_lock) { Tracks.Add(t); Save(); } }
 
+    /// <summary>Removes the library entry only; the stem files stay on disk (orphaned until reused or resplit).</summary>
+    public void RemoveEntryOnly(Track t) { lock (_lock) { Tracks.Remove(t); Save(); } }
+
     public void Remove(Track t)
     {
-        lock (_lock) { Tracks.Remove(t); Save(); }
+        RemoveEntryOnly(t);
         try { Directory.Delete(TrackDir(t), true); } catch { }
     }
 

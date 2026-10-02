@@ -10,6 +10,8 @@ public enum DeviceMode { Gpu, Cpu }
 
 public enum TrackState { Queued, Downloading, Separating, Ready, Failed }
 
+public enum DeleteChoice { Cancel, EntryOnly, Everything }
+
 public class Track
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");

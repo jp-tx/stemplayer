@@ -29,6 +29,10 @@ pick the CPU / NVIDIA CUDA / DirectML variant). Large download (several GB with 
 - **⬆ Update** button: downloads the newest GitHub release (SHA-256 verified) over the installed executable, then offers a restart.
   Only works from the installed binary, not `dotnet run`. Updates the app only, not the Python packages.
 - **Shift + drag a fader** moves every other fader by the same amount (clamped to 0-150%).
+- **Delete key** (or right-click > Delete…) removes the selected track, asking whether to keep the split
+  audio files on disk or delete everything.
+- Reimporting a file or YouTube link you've already split is detected by content hash / URL: if the stems
+  are still on disk you're offered reuse (instant) instead of resplitting from scratch.
 
 ## Notes
 - Only the Demucs 6-stem model separates guitar and keys; other models leave those faders disabled.

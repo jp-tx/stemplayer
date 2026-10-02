@@ -21,7 +21,7 @@
     <!-- Library + imports -->
     <Grid Grid.Row="1" RowDefinitions="*,Auto" Margin="12,0">
       <ListBox Grid.Row="0" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}"
-               DoubleTapped="OnTrackDoubleTapped">
+               DoubleTapped="OnTrackDoubleTapped" KeyDown="OnTrackListKeyDown">
         <ListBox.ItemTemplate>
           <DataTemplate x:DataType="vm:TrackItemViewModel">
             <Grid ColumnDefinitions="2*,*,*,60,80" Margin="2">
@@ -36,7 +36,7 @@
         <ListBox.ContextMenu>
           <ContextMenu>
             <MenuItem Header="Play" Command="{Binding PlayTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
-            <MenuItem Header="Delete from library" Command="{Binding DeleteTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
+            <MenuItem Header="Delete…" Command="{Binding DeleteTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
           </ContextMenu>
         </ListBox.ContextMenu>
       </ListBox>

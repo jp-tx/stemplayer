@@ -1,0 +1,15 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StemPlayer.Views.DeleteTrackWindow"
+        Title="Delete track" Width="420" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="20" Spacing="16">
+    <TextBlock x:Name="MessageText" TextWrapping="Wrap" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" Click="OnCancel" />
+      <Button Content="Remove from library" Click="OnEntryOnly"
+              ToolTip.Tip="Keeps the split audio files on disk" />
+      <Button Content="Delete everything" Click="OnEverything" Classes="accent" />
+    </StackPanel>
+  </StackPanel>
+</Window>

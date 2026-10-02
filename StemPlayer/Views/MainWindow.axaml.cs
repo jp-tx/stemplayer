@@ -57,6 +57,13 @@ public partial class MainWindow : Window
         if (Vm?.SelectedTrack != null) Vm.PlayTrackCommand.Execute(Vm.SelectedTrack);
     }
 
+    void OnTrackListKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Delete || Vm?.SelectedTrack == null) return;
+        e.Handled = true;
+        Vm.DeleteTrackCommand.Execute(Vm.SelectedTrack);
+    }
+
     void OnUrlKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) Vm?.ImportYouTubeCommand.Execute(null);
