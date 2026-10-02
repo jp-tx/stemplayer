@@ -2,10 +2,14 @@ using System;
 using System.Collections.Generic;
 using System.Threading;
 using Silk.NET.OpenAL;
+using SoundTouch;
 
 namespace StemPlayer.Services;
 
-/// <summary>Streams a <see cref="StemMixer"/> to the default audio device through OpenAL Soft (Windows + Linux + macOS).</summary>
+/// <summary>Streams a <see cref="StemMixer"/> to the default audio device through OpenAL Soft (Windows + Linux + macOS).
+/// Optionally time-stretches in real time via SoundTouch (tempo change, pitch preserved) - chosen over a
+/// higher-quality offline renderer specifically because responsiveness matters more than pristine audio
+/// here: tempo changes take effect immediately, with no render wait.</summary>
 public sealed unsafe class OpenAlOutput : IDisposable
 {
     const int BufferCount = 4;
@@ -23,6 +27,12 @@ public sealed unsafe class OpenAlOutput : IDisposable
     readonly Queue<uint> _free = new();
     readonly object _lock = new();
 
+    // Real-time tempo change. UseQuickSeek trades a bit of audio quality for lower CPU/latency - the
+    // right tradeoff here since responsiveness was explicitly asked for over artifact-free output.
+    readonly SoundTouchProcessor _soundTouch = new();
+    readonly List<float> _stretchFifo = new(); // interleaved stereo floats already out of SoundTouch, pending an OpenAL buffer
+    bool _mixerDrained; // true once the mixer itself has nothing left and SoundTouch has been flushed
+
     StemMixer? _mixer;
     Thread? _thread;
     volatile bool _stop;
@@ -32,7 +42,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
 
     // Independent wall-clock pacing: a flaky device (observed after a Bluetooth output drops) can report
     // buffers as processed far faster than real time, which would otherwise race the mixer through the
-    // whole track in seconds. Never hand the mixer more than ~0.5s of audio further ahead than real time.
+    // whole track in seconds. Never hand the device more than ~0.5s of audio further ahead than real time.
     readonly System.Diagnostics.Stopwatch _clock = new();
     long _framesReleased;
 
@@ -46,6 +56,11 @@ public sealed unsafe class OpenAlOutput : IDisposable
         _al = AL.GetApi();
         OpenDeviceAndContext();
         foreach (var b in _buffers) _free.Enqueue(b);
+
+        _soundTouch.SampleRate = StemMixer.SampleRate;
+        _soundTouch.Channels = StemMixer.Channels;
+        _soundTouch.Tempo = 1.0;
+        _soundTouch.SetSetting(SettingId.UseQuickSeek, 1);
     }
 
     // Must hold _lock when called after construction (i.e. from TryRecoverDevice).
@@ -93,6 +108,13 @@ public sealed unsafe class OpenAlOutput : IDisposable
         _ended = false;
     }
 
+    /// <summary>Tempo relative to the track's own speed (1.0 = unchanged). Takes effect immediately -
+    /// no render step, just changes how SoundTouch paces its next output.</summary>
+    public void SetTempoRatio(double ratio)
+    {
+        lock (_lock) _soundTouch.Tempo = Math.Max(0.1, ratio);
+    }
+
     public long PositionFrames
     {
         get
@@ -104,7 +126,9 @@ public sealed unsafe class OpenAlOutput : IDisposable
                 long buffered = 0;
                 foreach (var q in _queued) buffered += q.frames;
                 // _queued still contains buffers already fully played but not yet unqueued; the sample offset is
-                // relative to the start of the queue, so subtract it directly.
+                // relative to the start of the queue, so subtract it directly. This counts frames the MIXER has
+                // handed to SoundTouch, not frames actually played back - close enough for display purposes, and
+                // avoids needing to track SoundTouch's internal (and tempo-dependent) input:output ratio here.
                 long pos = _mixer.PositionFrames - Math.Max(0, buffered - off);
                 return Math.Clamp(pos, 0, _mixer.TotalFrames);
             }
@@ -163,12 +187,44 @@ public sealed unsafe class OpenAlOutput : IDisposable
         foreach (var b in _buffers) _free.Enqueue(b);
         _clock.Restart();
         _framesReleased = 0;
+
+        _soundTouch.Clear();
+        _stretchFifo.Clear();
+        _mixerDrained = false;
+    }
+
+    // Must hold _lock. Tops up _stretchFifo from the mixer via SoundTouch until there's enough for a
+    // buffer, or returns false once both the mixer and SoundTouch's tail are genuinely exhausted.
+    bool TopUpFifo(float[] mixerBuf, float[] stretchOutBuf)
+    {
+        while (_stretchFifo.Count < FramesPerBuffer * StemMixer.Channels)
+        {
+            if (!_mixerDrained)
+            {
+                int n = _mixer!.Read(mixerBuf, mixerBuf.Length);
+                if (n <= 0) { _mixerDrained = true; _soundTouch.Flush(); }
+                else _soundTouch.PutSamples(mixerBuf, n / StemMixer.Channels);
+            }
+
+            int avail = _soundTouch.AvailableSamples;
+            if (avail <= 0)
+            {
+                if (_mixerDrained) return _stretchFifo.Count > 0;
+                continue; // SoundTouch still buffering internally; feed it more on the next pass
+            }
+            int want = Math.Min(avail, stretchOutBuf.Length / StemMixer.Channels);
+            int got = _soundTouch.ReceiveSamples(stretchOutBuf, want);
+            for (int i = 0; i < got * StemMixer.Channels; i++) _stretchFifo.Add(stretchOutBuf[i]);
+            if (got == 0 && _mixerDrained) return _stretchFifo.Count > 0;
+        }
+        return true;
     }
 
     void Pump()
     {
-        var floats = new float[FramesPerBuffer * StemMixer.Channels];
-        var shorts = new short[floats.Length];
+        var mixerBuf = new float[FramesPerBuffer * StemMixer.Channels];
+        var stretchOutBuf = new float[FramesPerBuffer * StemMixer.Channels * 4];
+        var shorts = new short[FramesPerBuffer * StemMixer.Channels];
         bool drained = false;
         var deviceCheck = System.Diagnostics.Stopwatch.StartNew();
 
@@ -200,10 +256,14 @@ public sealed unsafe class OpenAlOutput : IDisposable
                     double aheadSeconds = (double)_framesReleased / StemMixer.SampleRate - _clock.Elapsed.TotalSeconds;
                     if (aheadSeconds > 0.5) break;
 
-                    int n = _mixer.Read(floats, floats.Length);
-                    if (n <= 0) { drained = true; break; }
+                    if (!TopUpFifo(mixerBuf, stretchOutBuf)) { drained = true; break; }
+                    int n = Math.Min(_stretchFifo.Count, FramesPerBuffer * StemMixer.Channels);
+                    if (n <= 0) break; // not enough buffered yet; try again next pass
+
                     for (int i = 0; i < n; i++)
-                        shorts[i] = (short)(Math.Clamp(floats[i], -1f, 1f) * short.MaxValue);
+                        shorts[i] = (short)(Math.Clamp(_stretchFifo[i], -1f, 1f) * short.MaxValue);
+                    _stretchFifo.RemoveRange(0, n);
+
                     uint buf = _free.Dequeue();
                     fixed (short* sp = shorts)
                         _al.BufferData(buf, BufferFormat.Stereo16, sp, n * sizeof(short), StemMixer.SampleRate);
@@ -217,7 +277,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
                 if (q > 0 && state != (int)SourceState.Playing) _al.SourcePlay(_source);
                 if (drained && q == 0) { _playing = false; _ended = true; TrackEnded?.Invoke(); return; }
             }
-            // A seek flushes everything; allow reading again.
+            // A seek flushes everything (including _mixerDrained); allow reading again.
             if (drained && _mixer != null && _mixer.PositionFrames < _mixer.TotalFrames) drained = false;
             Thread.Sleep(8);
         }

@@ -31,11 +31,11 @@ mkdir -p "$CONFIG"
 # (AMD on Linux: install a ROCm build of torch/onnxruntime into this venv yourself.)
 EXTRA="cpu"
 if command -v nvidia-smi >/dev/null && nvidia-smi -L >/dev/null 2>&1; then EXTRA="gpu"; fi
-say "Installing audio-separator[$EXTRA], yt-dlp and pedalboard (large download, several GB for CUDA)"
+say "Installing audio-separator[$EXTRA] and yt-dlp (large download, several GB for CUDA)"
 # Pin pip: 26.2.1 has a distlib bug ("Resource name escapes package") that breaks every
 # subsequent install in the venv. 24.0 is confirmed working; avoid a blind --upgrade here.
 "$VENV/bin/python" -m pip install "pip==24.0"
-"$VENV/bin/python" -m pip install --upgrade "audio-separator[$EXTRA]" yt-dlp audioread pedalboard
+"$VENV/bin/python" -m pip install --upgrade "audio-separator[$EXTRA]" yt-dlp audioread
 
 say "Installing StemPlayer to $DESKTOP"
 mkdir -p "$DESKTOP"

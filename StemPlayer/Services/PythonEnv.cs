@@ -61,9 +61,9 @@ public class PythonEnv
             InstallVariant.DirectML => "audio-separator[dml]",
             _ => "audio-separator[cpu]",
         };
-        log($"Installing {extra}, yt-dlp, and pedalboard (this can take several minutes)...");
+        log($"Installing {extra} and yt-dlp (this can take several minutes)...");
         int code = await ProcessRunner.RunAsync(Paths.VenvPython,
-            new[] { "-m", "pip", "install", "--upgrade", extra, "yt-dlp", "audioread", "pedalboard" }, log);
+            new[] { "-m", "pip", "install", "--upgrade", extra, "yt-dlp", "audioread" }, log);
         log(code == 0 ? "Install finished." : $"pip exited with code {code}.");
         if (!HasFfmpeg()) log("WARNING: ffmpeg was not found on PATH. It is required for both separation and YouTube import.");
         return code == 0;

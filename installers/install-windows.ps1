@@ -40,11 +40,11 @@ $VPy = "$Venv\Scripts\python.exe"
 # NVIDIA -> CUDA build. AMD / Intel (or anything else) -> DirectML build, which uses any DirectX 12 GPU.
 $Extra = 'dml'
 if (Get-Command nvidia-smi -ErrorAction SilentlyContinue) { $Extra = 'gpu' }
-Say "Installing audio-separator[$Extra], yt-dlp and pedalboard (large download)"
+Say "Installing audio-separator[$Extra] and yt-dlp (large download)"
 # Pin pip: 26.2.1 has a distlib bug ("Resource name escapes package") that breaks every
 # subsequent install in the venv. 24.0 is confirmed working; avoid a blind --upgrade here.
 & $VPy -m pip install "pip==24.0"
-& $VPy -m pip install --upgrade "audio-separator[$Extra]" yt-dlp audioread pedalboard
+& $VPy -m pip install --upgrade "audio-separator[$Extra]" yt-dlp audioread
 if ($LASTEXITCODE -ne 0) { throw 'pip install failed' }
 
 Say "Installing StemPlayer to $Desktop"

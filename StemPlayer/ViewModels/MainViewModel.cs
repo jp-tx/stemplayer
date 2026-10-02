@@ -20,7 +20,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     ImportService _importer;
     OpenAlOutput? _output;
     StemMixer? _mixer;
-    StretchService _stretch;
     readonly DispatcherTimer _timer;
     bool _seeking;
 
@@ -51,8 +50,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public string PositionText => TimeSpan.FromSeconds(Position).ToString(@"m\:ss");
     public string DurationText => TimeSpan.FromSeconds(Duration).ToString(@"m\:ss");
     public string NowPlayingText => NowPlaying == null ? "Nothing playing" : $"{NowPlaying.Title}  —  {NowPlaying.Artist}";
-    public string NowPlayingMeterText => NowPlaying?.Track is { Tempo: > 0 } t
-        ? $"{TempoBpm:0} BPM · {t.BeatsPerBar}/4 · {BarCount} bars" : "";
+    public string TempoText => HasMeter ? $"{TempoBpm:0} BPM" : "";
+    public string MeterText => NowPlaying?.Track is { Tempo: > 0 } t ? $"{t.BeatsPerBar}/4 · {BarCount} bars" : "";
     public bool HasMeter => NowPlaying?.Track is { Tempo: > 0 };
     public string PlayGlyph => IsPlaying ? "⏸" : "▶";
 
@@ -87,72 +86,31 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
-    // ---------- tempo / time-stretch ----------
+    // ---------- tempo / real-time time-stretch ----------
 
     [ObservableProperty] public partial double TempoBpm { get; set; }
-    [ObservableProperty] public partial bool IsStretching { get; set; }
-
-    /// <summary>Ratio of the currently playing audio's tempo to the track's detected tempo (1.0 =
-    /// unstretched/original). All beat-grid math below is anchored in the ORIGINAL track's time
-    /// (BeatsMs, Tempo); this is what converts to/from the timeline that's actually playing.</summary>
-    public double TempoFactor { get; private set; } = 1.0;
 
     const double TempoStepBpm = 5.0;
 
-    [RelayCommand] Task TempoUp() => ChangeTempoAsync(TempoBpm + TempoStepBpm);
-    [RelayCommand] Task TempoDown() => ChangeTempoAsync(TempoBpm - TempoStepBpm);
-    [RelayCommand] Task TempoReset() => NowPlaying?.Track is { Tempo: > 0 } t ? ChangeTempoAsync(t.Tempo) : Task.CompletedTask;
+    [RelayCommand] void TempoUp() => ChangeTempo(TempoBpm + TempoStepBpm);
+    [RelayCommand] void TempoDown() => ChangeTempo(TempoBpm - TempoStepBpm);
+    [RelayCommand] void TempoReset() { if (NowPlaying?.Track is { Tempo: > 0 } t) ChangeTempo(t.Tempo); }
 
-    /// <summary>Renders (or reuses a cached render of) every stem time-stretched to the new tempo via
-    /// pedalboard's Rubber Band-based time_stretch - chosen specifically for minimal artifacts, since
-    /// this is a transcription tool. Offline, not real-time: a render takes real wall-clock time even
-    /// with stems processed in parallel, so IsStretching gates the UI while it runs.</summary>
-    async Task ChangeTempoAsync(double newBpm)
+    /// <summary>Changes playback tempo instantly via SoundTouch inside OpenAlOutput - real-time, pitch
+    /// preserved, no render step. Chosen over a higher-quality offline renderer (e.g. Rubber Band)
+    /// specifically because responsiveness matters more here than pristine audio: the file itself
+    /// never changes length, so Position/Duration/BeatsMs all stay in one timeline, nothing to rescale.</summary>
+    void ChangeTempo(double newBpm)
     {
-        if (IsStretching || NowPlaying?.Track is not { Tempo: > 0 } t) return;
-        newBpm = Math.Round(Math.Clamp(newBpm, 20, 400));
-        double oldFactor = TempoFactor;
-        double factor = newBpm / t.Tempo;
-        double targetSeconds = Position * oldFactor / factor; // keep the same musical position
-        bool wasPlaying = IsPlaying;
-
-        string dir;
-        if (Math.Abs(factor - 1.0) < 0.001)
-        {
-            factor = 1.0;
-            dir = _library.TrackDir(t);
-        }
-        else
-        {
-            IsStretching = true;
-            Status = $"Time-stretching to {newBpm:0} BPM…";
-            string? rendered;
-            try
-            {
-                rendered = await _stretch.StretchAsync(_library.TrackDir(t), factor,
-                    p => Status = $"Time-stretching to {newBpm:0} BPM… {p * 100:0}%",
-                    l => Dispatcher.UIThread.Post(() => { Log.Add(l); while (Log.Count > 500) Log.RemoveAt(0); }));
-            }
-            finally { IsStretching = false; }
-            if (rendered == null) { Status = "Time-stretch failed; staying at the current tempo."; return; }
-            dir = rendered;
-        }
-
-        // Rescale the loop selection (if any) from the old timeline into the new one, so adjusting
-        // tempo doesn't silently discard a loop the user already set up.
-        if (LoopStartSeconds is { } ls) LoopStartSeconds = ls * oldFactor / factor;
-        if (LoopEndSeconds is { } le) LoopEndSeconds = le * oldFactor / factor;
-
-        TempoBpm = newBpm;
-        TempoFactor = factor;
-        ReloadMixer(dir, t, targetSeconds, wasPlaying);
-        OnPropertyChanged(nameof(NowPlayingMeterText));
-        LoopGridChanged?.Invoke();
+        if (NowPlaying?.Track is not { Tempo: > 0 } t) return;
+        TempoBpm = Math.Round(Math.Clamp(newBpm, 20, 400));
+        _output?.SetTempoRatio(TempoBpm / t.Tempo);
+        OnPropertyChanged(nameof(TempoText));
     }
 
-    /// <summary>The segment whose own bar grid is closest to a given (original-timeline) time - used
-    /// to anchor labeling/shifting for a point that may fall outside every segment (near a stop, or
-    /// beyond the first/last detected beat entirely).</summary>
+    /// <summary>The segment whose own bar grid is closest to a given time - used to anchor labeling/
+    /// shifting for a point that may fall outside every segment (near a stop, or beyond the first/last
+    /// detected beat entirely).</summary>
     static BeatSegment? NearestSegment(Track t, double seconds)
     {
         if (t.Segments.Count == 0) return null;
@@ -167,18 +125,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         return best;
     }
 
-    /// <summary>1-based bar and beat-within-bar for any time in the CURRENTLY PLAYING timeline
-    /// (rescaled by TempoFactor back to the original track time before the arithmetic), extrapolated
-    /// from the nearest segment's own downbeat phase using the measured tempo - this is what makes a
-    /// negative bar (before the first detected beat, e.g. a silent intro) or "last bar + N" (past the
-    /// last detected beat, e.g. a fade-out) a well-defined position instead of just undefined space.</summary>
-    (int Bar, int Beat)? BarBeatForTime(Track t, double seconds)
+    /// <summary>1-based bar and beat-within-bar for any time in the track, extrapolated from the
+    /// nearest segment's own downbeat phase using the measured tempo - this is what makes a negative
+    /// bar (before the first detected beat, e.g. a silent intro) or "last bar + N" (past the last
+    /// detected beat, e.g. a fade-out) a well-defined position instead of just undefined space.</summary>
+    static (int Bar, int Beat)? BarBeatForTime(Track t, double seconds)
     {
-        double original = seconds * TempoFactor;
-        if (NearestSegment(t, original) is not { } seg || t.Tempo <= 0) return null;
+        if (NearestSegment(t, seconds) is not { } seg || t.Tempo <= 0) return null;
         double refTime = t.BeatsMs[seg.StartBeatIndex + seg.DownbeatOffset] / 1000.0;
         double beatSeconds = 60.0 / t.Tempo;
-        int rel = (int)Math.Round((original - refTime) / beatSeconds);
+        int rel = (int)Math.Round((seconds - refTime) / beatSeconds);
         int bar = (int)Math.Floor(rel / (double)t.BeatsPerBar) + 1;
         int beat = ((rel % t.BeatsPerBar) + t.BeatsPerBar) % t.BeatsPerBar + 1;
         return (bar, beat);
@@ -195,12 +151,12 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     void ShiftDownbeat(int direction)
     {
         if (NowPlaying?.Track is not { } t || t.Tempo <= 0) return;
-        var seg = (LoopStartSeconds is { } s ? NearestSegment(t, s * TempoFactor) : null) ?? t.Segments.FirstOrDefault();
+        var seg = (LoopStartSeconds is { } s ? NearestSegment(t, s) : null) ?? t.Segments.FirstOrDefault();
         if (seg == null) return;
         seg.DownbeatOffset = ((seg.DownbeatOffset + direction) % t.BeatsPerBar + t.BeatsPerBar) % t.BeatsPerBar;
         _library.Save();
 
-        double beatSeconds = 60.0 / t.Tempo / TempoFactor; // one beat's length in the CURRENT (possibly stretched) timeline
+        double beatSeconds = 60.0 / t.Tempo;
         if (LoopStartSeconds is { } s0) LoopStartSeconds = s0 + direction * beatSeconds;
         if (LoopEndSeconds is { } e0) LoopEndSeconds = e0 + direction * beatSeconds;
 
@@ -232,8 +188,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             var seg = t.Segments[0];
             int startIdx = seg.StartBeatIndex + seg.DownbeatOffset;
             int endIdx = Math.Min(startIdx + t.BeatsPerBar, seg.EndBeatIndex);
-            LoopStartSeconds = t.BeatsMs[startIdx] / 1000.0 / TempoFactor;
-            LoopEndSeconds = t.BeatsMs[Math.Min(endIdx, t.BeatsMs.Count - 1)] / 1000.0 / TempoFactor;
+            LoopStartSeconds = t.BeatsMs[startIdx] / 1000.0;
+            LoopEndSeconds = t.BeatsMs[Math.Min(endIdx, t.BeatsMs.Count - 1)] / 1000.0;
         }
         else { LoopStartSeconds = null; LoopEndSeconds = null; }
         LoopGridChanged?.Invoke();
@@ -249,7 +205,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         Settings = SettingsStore.Load();
         (_library, _env, _importer) = Build();
-        _stretch = new StretchService(_env);
         foreach (var f in Faders) { f.Changed += ApplyFader; f.VolumeMoved += OnFaderMoved; }
         UpdateService.CleanupOldVersion();
         _timer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -290,7 +245,6 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         SettingsStore.Save(Settings);
         (_library, _env, _importer) = Build();
-        _stretch = new StretchService(_env);
         Reload();
         CheckSetup();
         StartBeatBackfill();
@@ -402,7 +356,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         t ??= SelectedTrack;
         if (t == null) return;
-        NowPlaying = t; // -> OnNowPlayingChanged: resets TempoBpm/TempoFactor and the loop selection
+        NowPlaying = t; // -> OnNowPlayingChanged: resets TempoBpm and the loop selection
         var start = LoopEnabled && LoopStartSeconds is { } s0 ? s0 : 0;
         ReloadMixer(_library.TrackDir(t.Track), t.Track, start, resumePlaying: true);
     }
@@ -530,9 +484,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         OnPropertyChanged(nameof(NowPlayingText));
         OnPropertyChanged(nameof(BarCount));
-        TempoFactor = 1.0;
         TempoBpm = value?.Track.Tempo ?? 0;
-        OnPropertyChanged(nameof(NowPlayingMeterText));
+        _output?.SetTempoRatio(1.0);
+        OnPropertyChanged(nameof(TempoText));
+        OnPropertyChanged(nameof(MeterText));
         OnPropertyChanged(nameof(HasMeter));
         ResetLoopSelection();
     }
