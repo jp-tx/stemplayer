@@ -28,6 +28,12 @@ public sealed unsafe class OpenAlOutput : IDisposable
     volatile bool _ended;
     float _volume = 1f;
 
+    // Independent wall-clock pacing: a flaky device (observed after a Bluetooth output drops) can report
+    // buffers as processed far faster than real time, which would otherwise race the mixer through the
+    // whole track in seconds. Never hand the mixer more than ~0.5s of audio further ahead than real time.
+    readonly System.Diagnostics.Stopwatch _clock = new();
+    long _framesReleased;
+
     public bool IsPlaying => _playing;
     public bool Ended => _ended;
     public event Action? TrackEnded;
@@ -120,6 +126,8 @@ public sealed unsafe class OpenAlOutput : IDisposable
         }
         _queued.Clear(); _free.Clear();
         foreach (var b in _buffers) _free.Enqueue(b);
+        _clock.Restart();
+        _framesReleased = 0;
     }
 
     void Pump()
@@ -144,6 +152,11 @@ public sealed unsafe class OpenAlOutput : IDisposable
 
                 while (_free.Count > 0 && !drained && _mixer != null)
                 {
+                    // If the device is consuming buffers faster than real time (seen when a Bluetooth
+                    // output drops), stop handing it more audio until real time has actually caught up.
+                    double aheadSeconds = (double)_framesReleased / StemMixer.SampleRate - _clock.Elapsed.TotalSeconds;
+                    if (aheadSeconds > 0.5) break;
+
                     int n = _mixer.Read(floats, floats.Length);
                     if (n <= 0) { drained = true; break; }
                     for (int i = 0; i < n; i++)
@@ -153,6 +166,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
                         _al.BufferData(buf, BufferFormat.Stereo16, sp, n * sizeof(short), StemMixer.SampleRate);
                     _al.SourceQueueBuffers(_source, 1, &buf);
                     _queued.Enqueue((buf, n / StemMixer.Channels));
+                    _framesReleased += n / StemMixer.Channels;
                 }
 
                 _al.GetSourceProperty(_source, GetSourceInteger.SourceState, out int state);
