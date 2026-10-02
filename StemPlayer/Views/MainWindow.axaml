@@ -94,6 +94,16 @@
           <TextBlock Grid.Column="2" Text="{Binding DurationText}" VerticalAlignment="Center" />
         </Grid>
 
+        <Grid ColumnDefinitions="Auto,*,Auto" ColumnSpacing="8">
+          <TextBlock Text="Loop" VerticalAlignment="Center" FontWeight="SemiBold" />
+          <Canvas Grid.Column="1" x:Name="LoopCanvas" Height="28" Background="#15808080" ClipToBounds="True"
+                  PointerPressed="OnLoopPointerPressed" PointerMoved="OnLoopPointerMoved"
+                  PointerReleased="OnLoopPointerReleased" />
+          <CheckBox Grid.Column="2" Content="Split bar" IsChecked="{Binding SplitBar}" VerticalAlignment="Center"
+                     ToolTip.Tip="Snap the loop handles to individual beats instead of whole bars" />
+        </Grid>
+        <TextBlock Text="{Binding LoopSelectionText}" Opacity="0.75" HorizontalAlignment="Center" FontFamily="monospace" />
+
         <ItemsControl ItemsSource="{Binding Faders}">
           <ItemsControl.ItemsPanel>
             <ItemsPanelTemplate><UniformGrid Rows="1" /></ItemsPanelTemplate>
@@ -119,7 +129,11 @@
 
     <DockPanel Grid.Row="3" Margin="14,0,14,8">
       <Button DockPanel.Dock="Right" Content="Restart now" Command="{Binding RestartCommand}" IsVisible="{Binding RestartNeeded}" />
-      <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,16,0" />
+      <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,8,0"
+                 IsVisible="{Binding HasMeter}" />
+      <Button DockPanel.Dock="Left" Content="Beat shift" Command="{Binding BeatShiftCommand}" Margin="0,0,16,0"
+              IsVisible="{Binding HasMeter}"
+              ToolTip.Tip="Nudge which beat counts as '1' if the detected downbeat looks off" />
       <TextBlock Text="{Binding Status}" Foreground="Orange" TextWrapping="Wrap" VerticalAlignment="Center" />
     </DockPanel>
   </Grid>

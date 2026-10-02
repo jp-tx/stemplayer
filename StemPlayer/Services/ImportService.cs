@@ -101,7 +101,12 @@ public class ImportService
     {
         track.BeatsMs = info.BeatsMs;
         track.Tempo = info.Tempo;
-        if (info.BeatsPerBar is { } bpb) { track.BeatsPerBar = bpb; track.MeterConfidence = info.MeterConfidence; }
+        if (info.BeatsPerBar is { } bpb)
+        {
+            track.BeatsPerBar = bpb;
+            track.MeterConfidence = info.MeterConfidence;
+            track.Segments = info.Segments;
+        }
     }
 
     async Task Run(ImportItemViewModel item, Func<CancellationToken, Task<string>> keyFor, Func<Track, string, CancellationToken, Task> body)
@@ -197,17 +202,16 @@ public class ImportService
         return track;
     }
 
-    /// <summary>Fills in beats/meter for any already-split tracks that don't have them yet (imported
-    /// before this feature existed, reused from an orphaned folder, or only partially analyzed by an
-    /// older version). Runs quietly in the background, one track at a time sharing the same import
-    /// gate; safe to call once at startup. Triggers on MeterConfidence being null rather than BeatsMs
-    /// being empty, since that's the one field that can't come from a JSON default.</summary>
+    /// <summary>Fills in beats/meter/segments for any already-split tracks that are missing them
+    /// (imported before this feature existed, reused from an orphaned folder, or only partially
+    /// analyzed by an older version — e.g. MeterConfidence set but no Segments yet). Runs quietly in
+    /// the background, one track at a time sharing the same import gate; safe to call once at startup.</summary>
     public async Task BackfillBeatsAsync(CancellationToken ct = default)
     {
         foreach (var track in _library.Tracks.ToList())
         {
             if (ct.IsCancellationRequested) return;
-            if (track.MeterConfidence != null) continue;
+            if (track.MeterConfidence != null && track.Segments.Count > 0) continue;
             var dir = _library.TrackDir(track);
             var source = Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "source.*").FirstOrDefault() : null;
             if (source == null) continue;

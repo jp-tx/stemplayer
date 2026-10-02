@@ -12,6 +12,18 @@ public enum TrackState { Queued, Downloading, Separating, Ready, Failed }
 
 public enum DeleteChoice { Cancel, EntryOnly, Everything }
 
+/// <summary>A run of beats (indices into Track.BeatsMs) consistent enough to trust a bar grid.
+/// Anchored purely from its own internal accent pattern — never inherits phase across a stop
+/// (a pause, a cappella break, rubato intro/outro) it wasn't part of.</summary>
+public class BeatSegment
+{
+    public int StartBeatIndex { get; set; }
+    /// <summary>Exclusive.</summary>
+    public int EndBeatIndex { get; set; }
+    /// <summary>Index of the first downbeat, relative to StartBeatIndex (0-based, &lt; BeatsPerBar).</summary>
+    public int DownbeatOffset { get; set; }
+}
+
 public class Track
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -39,6 +51,10 @@ public class Track
     /// <summary>Null until meter detection has run for this track (used as the backfill trigger, not just
     /// an informational score — an exact 0.0 from JSON defaults must not look like "already analyzed").</summary>
     public double? MeterConfidence { get; set; }
+
+    /// <summary>Beat-stable runs with their own independently-anchored downbeat phase. See <see cref="BeatSegment"/>.
+    /// Beats outside any segment (near a stop, or a short/unreliable run) have no bar/beat label.</summary>
+    public List<BeatSegment> Segments { get; set; } = new();
 }
 
 public class AppSettings

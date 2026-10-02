@@ -50,8 +50,89 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public string PositionText => TimeSpan.FromSeconds(Position).ToString(@"m\:ss");
     public string DurationText => TimeSpan.FromSeconds(Duration).ToString(@"m\:ss");
     public string NowPlayingText => NowPlaying == null ? "Nothing playing" : $"{NowPlaying.Title}  —  {NowPlaying.Artist}";
-    public string NowPlayingMeterText => NowPlaying?.Track is { Tempo: > 0 } t ? $"{t.Tempo:0} BPM · {t.BeatsPerBar}/4" : "";
+    public string NowPlayingMeterText => NowPlaying?.Track is { Tempo: > 0 } t
+        ? $"{t.Tempo:0} BPM · {t.BeatsPerBar}/4 · {BarCount} bars" : "";
+    public bool HasMeter => NowPlaying?.Track is { Tempo: > 0 };
     public string PlayGlyph => IsPlaying ? "⏸" : "▶";
+
+    // ---------- bars / loop editor (not playback-looping yet, just the selection UI) ----------
+
+    [ObservableProperty] public partial bool SplitBar { get; set; }
+    [ObservableProperty] public partial int? LoopStartBeat { get; set; }
+    [ObservableProperty] public partial int? LoopEndBeat { get; set; }
+
+    public int BarCount => NowPlaying?.Track is { } t
+        ? t.Segments.Sum(s => (s.EndBeatIndex - s.StartBeatIndex) / t.BeatsPerBar) : 0;
+
+    public string LoopSelectionText
+    {
+        get
+        {
+            if (NowPlaying?.Track is not { } t || LoopStartBeat is not { } s || LoopEndBeat is not { } e) return "";
+            string Fmt(int beat)
+            {
+                var bb = BarBeatFor(t, beat);
+                if (bb == null) return "—";
+                return SplitBar ? $"Bar {bb.Value.Bar}, Beat {bb.Value.Beat}" : $"Bar {bb.Value.Bar}";
+            }
+            return $"{Fmt(s)}  →  {Fmt(e)}";
+        }
+    }
+
+    /// <summary>1-based bar and beat-within-bar for a beat index, or null if it falls outside every
+    /// segment (near a stop, or in a run too short/unreliable to trust a phase from).</summary>
+    static (int Bar, int Beat)? BarBeatFor(Track t, int beatIndex)
+    {
+        foreach (var seg in t.Segments)
+        {
+            if (beatIndex < seg.StartBeatIndex || beatIndex >= seg.EndBeatIndex) continue;
+            int rel = beatIndex - seg.StartBeatIndex - seg.DownbeatOffset;
+            int bar = (int)Math.Floor(rel / (double)t.BeatsPerBar) + 1;
+            int beat = ((rel % t.BeatsPerBar) + t.BeatsPerBar) % t.BeatsPerBar + 1;
+            return (bar, beat);
+        }
+        return null;
+    }
+
+    /// <summary>Shifts which beat counts as "1" for whichever segment contains the current loop
+    /// selection (or the whole track's first segment if no selection), correcting a detector phase
+    /// error. Only relabels bars/beats - the underlying beat timestamps and audio are unaffected.</summary>
+    [RelayCommand]
+    void BeatShift()
+    {
+        if (NowPlaying?.Track is not { } t || t.Segments.Count == 0) return;
+        var anchor = LoopStartBeat ?? t.Segments[0].StartBeatIndex;
+        var seg = t.Segments.FirstOrDefault(s => anchor >= s.StartBeatIndex && anchor < s.EndBeatIndex) ?? t.Segments[0];
+        seg.DownbeatOffset = (seg.DownbeatOffset + 1) % t.BeatsPerBar;
+        _library.Save();
+        OnPropertyChanged(nameof(LoopSelectionText));
+        LoopGridChanged?.Invoke();
+    }
+
+    /// <summary>Raised whenever the view needs to redraw the loop timeline (grid shifted, selection
+    /// moved, split-bar toggled, a different track is now playing).</summary>
+    public event Action? LoopGridChanged;
+
+    void ResetLoopSelection()
+    {
+        if (NowPlaying?.Track is { Segments.Count: > 0 } t)
+        {
+            var seg = t.Segments[0];
+            LoopStartBeat = seg.StartBeatIndex + seg.DownbeatOffset;
+            LoopEndBeat = Math.Min(LoopStartBeat.Value + t.BeatsPerBar, seg.EndBeatIndex);
+        }
+        else { LoopStartBeat = null; LoopEndBeat = null; }
+        LoopGridChanged?.Invoke();
+    }
+
+    partial void OnSplitBarChanged(bool value)
+    {
+        OnPropertyChanged(nameof(LoopSelectionText));
+        LoopGridChanged?.Invoke();
+    }
+
+    partial void OnLoopStartBeatChanged(int? value) => OnPropertyChanged(nameof(LoopSelectionText));
+    partial void OnLoopEndBeatChanged(int? value) => OnPropertyChanged(nameof(LoopSelectionText));
 
     public MainViewModel()
     {
@@ -310,7 +391,10 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     partial void OnNowPlayingChanged(TrackItemViewModel? value)
     {
         OnPropertyChanged(nameof(NowPlayingText));
+        OnPropertyChanged(nameof(BarCount));
         OnPropertyChanged(nameof(NowPlayingMeterText));
+        OnPropertyChanged(nameof(HasMeter));
+        ResetLoopSelection();
     }
     partial void OnIsPlayingChanged(bool value) => OnPropertyChanged(nameof(PlayGlyph));
     partial void OnMasterVolumeChanged(double value) => _output?.SetVolume((float)value);

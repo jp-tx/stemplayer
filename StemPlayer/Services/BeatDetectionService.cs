@@ -6,21 +6,23 @@ using System.Reflection;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using StemPlayer.Models;
 
 namespace StemPlayer.Services;
 
-/// <summary>Beat grid + meter for a track. Internal use only for now — not shown in the UI, just stored
-/// on the track for a future feature. <see cref="BeatsPerBar"/> is null if detection isn't available or
+/// <summary>Beat grid + meter for a track. Internal use only for now — not shown in the UI beyond the
+/// tempo/time-signature summary. <see cref="BeatsPerBar"/> is null if detection isn't available or
 /// failed (distinct from "4", which is the confident-or-default result).</summary>
-public record BeatInfo(List<long> BeatsMs, double Tempo, int? BeatsPerBar, double MeterConfidence);
+public record BeatInfo(List<long> BeatsMs, double Tempo, int? BeatsPerBar, double MeterConfidence, List<BeatSegment> Segments);
 
 /// <summary>
-/// Detects millisecond-accurate beat timestamps and a 3-vs-4 beats-per-bar estimate via librosa
-/// (already installed as an audio-separator dependency).
+/// Detects millisecond-accurate beat timestamps, a 3-vs-4 beats-per-bar estimate, and beat-stable
+/// segments (so a mid-song stop doesn't force one bad global downbeat phase) via librosa (already
+/// installed as an audio-separator dependency).
 /// </summary>
 public class BeatDetectionService
 {
-    static readonly BeatInfo Empty = new(new(), 0, null, 0);
+    static readonly BeatInfo Empty = new(new(), 0, null, 0, new());
 
     readonly PythonEnv _env;
     public BeatDetectionService(PythonEnv env) => _env = env;
@@ -45,6 +47,7 @@ public class BeatDetectionService
         List<long> beats = new();
         double tempo = 0, confidence = 0;
         int? beatsPerBar = null;
+        List<BeatSegment> segments = new();
         string? error = null;
 
         int code = await ProcessRunner.RunAsync(_env.Python, args, line =>
@@ -58,6 +61,13 @@ public class BeatDetectionService
                 if (r.TryGetProperty("tempo", out var t)) tempo = t.GetDouble();
                 if (r.TryGetProperty("beats_per_bar", out var bpb)) beatsPerBar = bpb.GetInt32();
                 if (r.TryGetProperty("meter_confidence", out var mc)) confidence = mc.GetDouble();
+                if (r.TryGetProperty("segments", out var segs))
+                    segments = segs.EnumerateArray().Select(s => new BeatSegment
+                    {
+                        StartBeatIndex = s.GetProperty("start").GetInt32(),
+                        EndBeatIndex = s.GetProperty("end").GetInt32(),
+                        DownbeatOffset = s.GetProperty("downbeat_offset").GetInt32(),
+                    }).ToList();
                 if (r.TryGetProperty("error", out var er)) error = er.GetString();
             }
             catch { log?.Invoke(line); }
@@ -68,6 +78,6 @@ public class BeatDetectionService
             log?.Invoke($"Beat detection skipped: {error ?? $"exit code {code}"}");
             return Empty;
         }
-        return new BeatInfo(beats, tempo, beatsPerBar, confidence);
+        return new BeatInfo(beats, tempo, beatsPerBar, confidence, segments);
     }
 }
