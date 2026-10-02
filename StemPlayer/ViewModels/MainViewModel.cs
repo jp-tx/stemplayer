@@ -323,7 +323,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             _output.SetVolume((float)MasterVolume);
             NowPlaying = t;
             Duration = Math.Max(1, _mixer.TotalFrames / (double)StemMixer.SampleRate);
-            Position = 0;
+            var start = LoopEnabled && LoopStartSeconds is { } s0 ? s0 : 0;
+            Position = start;
+            if (start > 0) _output.Seek((long)(start * StemMixer.SampleRate));
             _output.Play();
             IsPlaying = true;
             Status = "";
@@ -338,7 +340,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         if (_output == null || NowPlaying == null) { PlayTrack(SelectedTrack); return; }
         if (IsPlaying) { _output.Pause(); IsPlaying = false; }
-        else { _output.Play(); IsPlaying = true; }
+        else
+        {
+            if (LoopEnabled && LoopStartSeconds is { } s)
+            {
+                _output.Seek((long)(s * StemMixer.SampleRate));
+                Position = s;
+            }
+            _output.Play();
+            IsPlaying = true;
+        }
     }
 
     [RelayCommand]
