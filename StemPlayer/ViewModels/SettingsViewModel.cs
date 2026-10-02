@@ -52,7 +52,7 @@ public partial class SettingsViewModel : ViewModelBase
         _s.Model = string.IsNullOrWhiteSpace(Model) ? "htdemucs_6s.yaml" : Model.Trim();
         _s.Device = UseGpu ? DeviceMode.Gpu : DeviceMode.Cpu;
         _s.PythonPath = PythonPath.Trim();
-        _s.LibraryDir = LibraryDir.Trim();
+        _s.LibraryDir = LibraryDir.Trim().Trim('"');
     }
 
     void Write(string line) => Dispatcher.UIThread.Post(() => Output.Add(line));

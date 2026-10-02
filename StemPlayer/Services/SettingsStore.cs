@@ -23,7 +23,14 @@ public static class SettingsStore
     {
         var dir = string.IsNullOrWhiteSpace(s.LibraryDir)
             ? Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "StemPlayer")
-            : s.LibraryDir;
-        return Directory.CreateDirectory(dir).FullName;
+            : s.LibraryDir.Trim().Trim('"');
+        try { return Directory.CreateDirectory(dir).FullName; }
+        catch (IOException)
+        {
+            // A bad saved path (e.g. one that slipped through before trimming was added) must
+            // not permanently crash the app on every startup with no way back into Settings.
+            var fallback = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyMusic), "StemPlayer");
+            return Directory.CreateDirectory(fallback).FullName;
+        }
     }
 }

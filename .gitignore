@@ -3,3 +3,4 @@ obj/
 .vs/
 *.user
 publish/
+publish-win-x64/
