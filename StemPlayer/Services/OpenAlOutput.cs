@@ -11,12 +11,14 @@ public sealed unsafe class OpenAlOutput : IDisposable
     const int BufferCount = 4;
     const int FramesPerBuffer = 2048; // ~46 ms each, ~185 ms total fader latency
 
+    const int AlcConnected = 0x313; // ALC_EXT_disconnect's ALC_CONNECTED, not in Silk.NET's GetContextInteger enum
+
     readonly AL _al;
     readonly ALContext _alc;
-    readonly Device* _device;
-    readonly Context* _ctx;
-    readonly uint _source;
-    readonly uint[] _buffers = new uint[BufferCount];
+    Device* _device;
+    Context* _ctx;
+    uint _source;
+    uint[] _buffers = new uint[BufferCount];
     readonly Queue<(uint buf, int frames)> _queued = new();
     readonly Queue<uint> _free = new();
     readonly object _lock = new();
@@ -42,12 +44,45 @@ public sealed unsafe class OpenAlOutput : IDisposable
     {
         _alc = ALContext.GetApi();
         _al = AL.GetApi();
+        OpenDeviceAndContext();
+        foreach (var b in _buffers) _free.Enqueue(b);
+    }
+
+    // Must hold _lock when called after construction (i.e. from TryRecoverDevice).
+    void OpenDeviceAndContext()
+    {
         _device = _alc.OpenDevice("");
         if (_device == null) throw new InvalidOperationException("No audio output device found (OpenAL).");
         _ctx = _alc.CreateContext(_device, null);
         _alc.MakeContextCurrent(_ctx);
         _source = _al.GenSource();
-        for (int i = 0; i < BufferCount; i++) { _buffers[i] = _al.GenBuffer(); _free.Enqueue(_buffers[i]); }
+        _al.SetSourceProperty(_source, SourceFloat.Gain, _volume);
+        _buffers = new uint[BufferCount];
+        for (int i = 0; i < BufferCount; i++) _buffers[i] = _al.GenBuffer();
+    }
+
+    /// <summary>True once the device has signalled it dropped out (observed when a Bluetooth output
+    /// disconnects). OpenAL Soft does not auto-recover or follow OS default-device changes on its own.</summary>
+    bool IsDeviceConnected()
+    {
+        int connected = 1;
+        _alc.GetContextProperty(_device, (GetContextInteger)AlcConnected, 1, &connected);
+        return connected != 0;
+    }
+
+    // Must hold _lock. Tears down the dead device/context/source/buffers and opens a fresh default
+    // device, then resumes feeding it from wherever the mixer currently is.
+    void TryRecoverDevice()
+    {
+        try { _al.DeleteSource(_source); foreach (var b in _buffers) _al.DeleteBuffer(b); } catch { }
+        try { _alc.MakeContextCurrent(null); _alc.DestroyContext(_ctx); } catch { }
+        try { _alc.CloseDevice(_device); } catch { }
+
+        OpenDeviceAndContext();
+        _queued.Clear(); _free.Clear();
+        foreach (var b in _buffers) _free.Enqueue(b);
+        _clock.Restart();
+        _framesReleased = 0;
     }
 
     public void Load(StemMixer mixer)
@@ -76,7 +111,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
         }
     }
 
-    public void SetVolume(float v) { _volume = v; _al.SetSourceProperty(_source, SourceFloat.Gain, v); }
+    public void SetVolume(float v) { _volume = v; lock (_lock) _al.SetSourceProperty(_source, SourceFloat.Gain, v); }
 
     public void Play()
     {
@@ -135,9 +170,17 @@ public sealed unsafe class OpenAlOutput : IDisposable
         var floats = new float[FramesPerBuffer * StemMixer.Channels];
         var shorts = new short[floats.Length];
         bool drained = false;
+        var deviceCheck = System.Diagnostics.Stopwatch.StartNew();
 
         while (!_stop)
         {
+            if (deviceCheck.Elapsed.TotalSeconds > 1)
+            {
+                deviceCheck.Restart();
+                try { lock (_lock) { if (!IsDeviceConnected()) TryRecoverDevice(); } }
+                catch { /* best-effort: retry again on the next tick */ }
+            }
+
             if (!_playing) { Thread.Sleep(20); continue; }
             lock (_lock)
             {
