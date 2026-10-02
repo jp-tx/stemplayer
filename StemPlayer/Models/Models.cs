@@ -29,6 +29,16 @@ public class Track
     /// <summary>Beat timestamps in milliseconds from track start, detected via librosa. Internal use only
     /// (not shown in the UI yet) — empty if detection failed or hasn't run for this track.</summary>
     public List<long> BeatsMs { get; set; } = new();
+
+    public double Tempo { get; set; }
+
+    /// <summary>3 or 4 (6/8 is reported as 3 — equivalent for transcription purposes). Defaults to 4 when
+    /// detection is ambiguous or hasn't run.</summary>
+    public int BeatsPerBar { get; set; } = 4;
+
+    /// <summary>Null until meter detection has run for this track (used as the backfill trigger, not just
+    /// an informational score — an exact 0.0 from JSON defaults must not look like "already analyzed").</summary>
+    public double? MeterConfidence { get; set; }
 }
 
 public class AppSettings

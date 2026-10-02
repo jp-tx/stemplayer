@@ -9,13 +9,19 @@ using System.Threading.Tasks;
 
 namespace StemPlayer.Services;
 
+/// <summary>Beat grid + meter for a track. Internal use only for now — not shown in the UI, just stored
+/// on the track for a future feature. <see cref="BeatsPerBar"/> is null if detection isn't available or
+/// failed (distinct from "4", which is the confident-or-default result).</summary>
+public record BeatInfo(List<long> BeatsMs, double Tempo, int? BeatsPerBar, double MeterConfidence);
+
 /// <summary>
-/// Detects millisecond-accurate beat timestamps for a track via librosa (already installed as an
-/// audio-separator dependency). Internal use only for now — not shown in the UI, just stored on the
-/// track for a future feature.
+/// Detects millisecond-accurate beat timestamps and a 3-vs-4 beats-per-bar estimate via librosa
+/// (already installed as an audio-separator dependency).
 /// </summary>
 public class BeatDetectionService
 {
+    static readonly BeatInfo Empty = new(new(), 0, null, 0);
+
     readonly PythonEnv _env;
     public BeatDetectionService(PythonEnv env) => _env = env;
 
@@ -26,15 +32,22 @@ public class BeatDetectionService
         s.CopyTo(f);
     }
 
-    /// <returns>Beat timestamps in milliseconds from the start of <paramref name="audioFile"/>, or an
-    /// empty list if detection isn't available or fails (best-effort; never throws except on cancellation).</returns>
-    public async Task<List<long>> DetectAsync(string audioFile, Action<string>? log = null, CancellationToken ct = default)
+    /// <param name="audioFile">Full mix, used for tempo + beat timing.</param>
+    /// <param name="accentFile">Optional isolated drums stem, used for meter grouping (falls back to
+    /// <paramref name="audioFile"/> when not separated for this track's model).</param>
+    public async Task<BeatInfo> DetectAsync(string audioFile, string? accentFile = null, Action<string>? log = null, CancellationToken ct = default)
     {
         EnsureScript();
+        var args = accentFile == null
+            ? new[] { Paths.BeatDetectScript, "--input", audioFile }
+            : new[] { Paths.BeatDetectScript, "--input", audioFile, "--accent", accentFile };
+
         List<long> beats = new();
+        double tempo = 0, confidence = 0;
+        int? beatsPerBar = null;
         string? error = null;
 
-        int code = await ProcessRunner.RunAsync(_env.Python, new[] { Paths.BeatDetectScript, "--input", audioFile }, line =>
+        int code = await ProcessRunner.RunAsync(_env.Python, args, line =>
         {
             if (!line.StartsWith("@@")) { log?.Invoke(line); return; }
             try
@@ -42,6 +55,9 @@ public class BeatDetectionService
                 using var doc = JsonDocument.Parse(line[2..]);
                 var r = doc.RootElement;
                 if (r.TryGetProperty("beats_ms", out var b)) beats = b.EnumerateArray().Select(x => x.GetInt64()).ToList();
+                if (r.TryGetProperty("tempo", out var t)) tempo = t.GetDouble();
+                if (r.TryGetProperty("beats_per_bar", out var bpb)) beatsPerBar = bpb.GetInt32();
+                if (r.TryGetProperty("meter_confidence", out var mc)) confidence = mc.GetDouble();
                 if (r.TryGetProperty("error", out var er)) error = er.GetString();
             }
             catch { log?.Invoke(line); }
@@ -50,8 +66,8 @@ public class BeatDetectionService
         if (code != 0 || error != null)
         {
             log?.Invoke($"Beat detection skipped: {error ?? $"exit code {code}"}");
-            return new();
+            return Empty;
         }
-        return beats;
+        return new BeatInfo(beats, tempo, beatsPerBar, confidence);
     }
 }

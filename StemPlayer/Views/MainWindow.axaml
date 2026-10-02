@@ -119,6 +119,7 @@
 
     <DockPanel Grid.Row="3" Margin="14,0,14,8">
       <Button DockPanel.Dock="Right" Content="Restart now" Command="{Binding RestartCommand}" IsVisible="{Binding RestartNeeded}" />
+      <TextBlock DockPanel.Dock="Left" Text="{Binding NowPlayingMeterText}" Opacity="0.7" VerticalAlignment="Center" Margin="0,0,16,0" />
       <TextBlock Text="{Binding Status}" Foreground="Orange" TextWrapping="Wrap" VerticalAlignment="Center" />
     </DockPanel>
   </Grid>

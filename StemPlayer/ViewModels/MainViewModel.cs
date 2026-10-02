@@ -50,6 +50,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public string PositionText => TimeSpan.FromSeconds(Position).ToString(@"m\:ss");
     public string DurationText => TimeSpan.FromSeconds(Duration).ToString(@"m\:ss");
     public string NowPlayingText => NowPlaying == null ? "Nothing playing" : $"{NowPlaying.Title}  —  {NowPlaying.Artist}";
+    public string NowPlayingMeterText => NowPlaying?.Track is { Tempo: > 0 } t ? $"{t.Tempo:0} BPM · {t.BeatsPerBar}/4" : "";
     public string PlayGlyph => IsPlaying ? "⏸" : "▶";
 
     public MainViewModel()
@@ -306,7 +307,11 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     partial void OnPositionChanged(double value) => OnPropertyChanged(nameof(PositionText));
     partial void OnDurationChanged(double value) => OnPropertyChanged(nameof(DurationText));
-    partial void OnNowPlayingChanged(TrackItemViewModel? value) => OnPropertyChanged(nameof(NowPlayingText));
+    partial void OnNowPlayingChanged(TrackItemViewModel? value)
+    {
+        OnPropertyChanged(nameof(NowPlayingText));
+        OnPropertyChanged(nameof(NowPlayingMeterText));
+    }
     partial void OnIsPlayingChanged(bool value) => OnPropertyChanged(nameof(PlayGlyph));
     partial void OnMasterVolumeChanged(double value) => _output?.SetVolume((float)value);
 

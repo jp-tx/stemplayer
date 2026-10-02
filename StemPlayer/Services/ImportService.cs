@@ -91,7 +91,17 @@ public class ImportService
             l => LogLine?.Invoke(l), ct);
 
         Set(item, "Detecting beats", 0.98, indeterminate: true);
-        track.BeatsMs = await _beats.DetectAsync(source, l => LogLine?.Invoke(l), ct);
+        ApplyBeatInfo(track, await _beats.DetectAsync(source, AccentFile(track, dir), l => LogLine?.Invoke(l), ct));
+    }
+
+    static string? AccentFile(Track track, string dir) =>
+        track.Stems.TryGetValue("drums", out var rel) ? Path.Combine(dir, rel) : null;
+
+    static void ApplyBeatInfo(Track track, BeatInfo info)
+    {
+        track.BeatsMs = info.BeatsMs;
+        track.Tempo = info.Tempo;
+        if (info.BeatsPerBar is { } bpb) { track.BeatsPerBar = bpb; track.MeterConfidence = info.MeterConfidence; }
     }
 
     async Task Run(ImportItemViewModel item, Func<CancellationToken, Task<string>> keyFor, Func<Track, string, CancellationToken, Task> body)
@@ -187,23 +197,28 @@ public class ImportService
         return track;
     }
 
-    /// <summary>Fills in beat timestamps for any already-split tracks that don't have them yet (imported
-    /// before this feature existed, or reused from an orphaned folder). Runs quietly in the background,
-    /// one track at a time sharing the same import gate; safe to call once at startup.</summary>
+    /// <summary>Fills in beats/meter for any already-split tracks that don't have them yet (imported
+    /// before this feature existed, reused from an orphaned folder, or only partially analyzed by an
+    /// older version). Runs quietly in the background, one track at a time sharing the same import
+    /// gate; safe to call once at startup. Triggers on MeterConfidence being null rather than BeatsMs
+    /// being empty, since that's the one field that can't come from a JSON default.</summary>
     public async Task BackfillBeatsAsync(CancellationToken ct = default)
     {
         foreach (var track in _library.Tracks.ToList())
         {
             if (ct.IsCancellationRequested) return;
-            if (track.BeatsMs.Count > 0) continue;
+            if (track.MeterConfidence != null) continue;
             var dir = _library.TrackDir(track);
             var source = Directory.Exists(dir) ? Directory.EnumerateFiles(dir, "source.*").FirstOrDefault() : null;
             if (source == null) continue;
 
             await _gate.WaitAsync(ct);
-            try { track.BeatsMs = await _beats.DetectAsync(source, l => LogLine?.Invoke(l), ct); }
+            BeatInfo info;
+            try { info = await _beats.DetectAsync(source, AccentFile(track, dir), l => LogLine?.Invoke(l), ct); }
             finally { _gate.Release(); }
-            if (track.BeatsMs.Count > 0) _library.Save();
+            if (info.BeatsPerBar == null) continue; // detection failed; try again next startup
+            ApplyBeatInfo(track, info);
+            _library.Save();
         }
     }
 
