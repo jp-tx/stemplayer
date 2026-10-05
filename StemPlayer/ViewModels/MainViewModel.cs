@@ -257,10 +257,24 @@ public partial class MainViewModel : ViewModelBase, IDisposable
             Tracks.Add(new TrackItemViewModel(t));
     }
 
+    bool _autoSetupRunning;
+
     async void CheckSetup()
     {
         if (!await _env.HasSeparatorAsync())
-            Status = "audio-separator is not installed yet. Open Options > Set up Python environment.";
+        {
+            if (_autoSetupRunning) return;
+            _autoSetupRunning = true;
+            try
+            {
+                Status = "Setting up Python environment (first run, this can take several minutes)...";
+                bool ok = await _env.InstallAsync(PythonEnv.DefaultVariant(),
+                    line => Avalonia.Threading.Dispatcher.UIThread.Post(() => Status = "Setting up Python: " + line));
+                Status = ok ? (PythonEnv.HasFfmpeg() ? "" : "ffmpeg was not found on PATH; install it for importing.")
+                            : "Automatic Python setup failed. Open Options > Set up Python environment to see the log.";
+            }
+            finally { _autoSetupRunning = false; }
+        }
         else Status = PythonEnv.HasFfmpeg() ? "" : "ffmpeg was not found on PATH; install it for importing.";
     }
 
