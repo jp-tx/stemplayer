@@ -180,6 +180,19 @@ public class PythonEnv
         int code = await ProcessRunner.RunAsync(Paths.VenvPython,
             new[] { "-m", "pip", "install", "--upgrade", extra, "yt-dlp", "audioread" }, log);
         _venvWorks = null;
+        if (code == 0 && variant == InstallVariant.NvidiaCuda && OperatingSystem.IsWindows())
+        {
+            // On Windows PyPI only ships CPU-only torch, so Demucs/Roformer would silently run on the CPU.
+            bool cuda = await ProcessRunner.RunAsync(Paths.VenvPython,
+                new[] { "-c", "import sys, torch; sys.exit(0 if torch.cuda.is_available() else 1)" }, _ => { }) == 0;
+            if (!cuda)
+            {
+                log("Installed PyTorch is CPU-only; replacing it with the CUDA build (large download)...");
+                code = await ProcessRunner.RunAsync(Paths.VenvPython,
+                    new[] { "-m", "pip", "install", "--force-reinstall", "--no-deps", "torch", "torchvision",
+                            "--index-url", "https://download.pytorch.org/whl/cu128" }, log);
+            }
+        }
         log(code == 0 ? "Install finished." : $"pip exited with code {code}.");
         if (!HasFfmpeg()) log("WARNING: ffmpeg was not found on PATH. It is required for both separation and YouTube import.");
         return code == 0;
