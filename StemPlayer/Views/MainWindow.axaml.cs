@@ -31,6 +31,11 @@ public partial class MainWindow : Window
         // Track Shift for the fader "move all the others" gesture. Pointer events also carry modifiers, which
         // keeps this correct if Shift was pressed while another control had focus.
         AddHandler(KeyDownEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
+        // Ctrl+F jumps to the search box.
+        AddHandler(KeyDownEvent, (_, e) =>
+        {
+            if (e.Key == Key.F && e.KeyModifiers.HasFlag(KeyModifiers.Control)) { SearchBox.Focus(); SearchBox.SelectAll(); e.Handled = true; }
+        }, RoutingStrategies.Tunnel);
         AddHandler(KeyUpEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerPressedEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
         AddHandler(PointerMovedEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -70,6 +75,14 @@ public partial class MainWindow : Window
     void OnTrackDoubleTapped(object? sender, TappedEventArgs e)
     {
         if (Vm?.SelectedTrack != null) Vm.PlayTrackCommand.Execute(Vm.SelectedTrack);
+        else if (Vm?.SelectedRow is ListHeaderViewModel h) Vm.PlayListCommand.Execute(h);
+    }
+
+    void OnSearchKeyDown(object? sender, KeyEventArgs e)
+    {
+        if (e.Key != Key.Escape || Vm == null) return;
+        e.Handled = true;
+        Vm.ClearSearchCommand.Execute(null);
     }
 
     void OnTrackListKeyDown(object? sender, KeyEventArgs e)

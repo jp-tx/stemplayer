@@ -19,12 +19,30 @@
     </Grid>
 
     <!-- Library + imports -->
-    <Grid Grid.Row="1" RowDefinitions="*,Auto" Margin="12,0">
-      <ListBox Grid.Row="0" ItemsSource="{Binding Tracks}" SelectedItem="{Binding SelectedTrack}"
+    <Grid Grid.Row="1" RowDefinitions="Auto,*,Auto" Margin="12,0">
+      <Grid Grid.Row="0" ColumnDefinitions="*,Auto,Auto" ColumnSpacing="8" Margin="0,0,0,8">
+        <TextBox x:Name="SearchBox" Grid.Column="0" PlaceholderText="Search songs, artists, albums, lists…"
+                 Text="{Binding Search}" KeyDown="OnSearchKeyDown" />
+        <Button Grid.Column="1" Content="✕" Command="{Binding ClearSearchCommand}" IsVisible="{Binding HasSearch}"
+                ToolTip.Tip="Clear search (Esc)" />
+        <Button Grid.Column="2" Content="＋ New list" Command="{Binding NewListCommand}"
+                ToolTip.Tip="Create a list. Right-click a song > Add to list… to fill it; playback cycles through a list." />
+      </Grid>
+
+      <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
                DoubleTapped="OnTrackDoubleTapped" KeyDown="OnTrackListKeyDown">
-        <ListBox.ItemTemplate>
+        <ListBox.DataTemplates>
+          <DataTemplate x:DataType="vm:ListHeaderViewModel">
+            <Grid ColumnDefinitions="Auto,*,Auto" Margin="2" ColumnSpacing="8">
+              <Button Grid.Column="0" Content="{Binding Arrow}" Command="{Binding ToggleCommand}"
+                      Padding="6,0" MinWidth="24" Background="Transparent" BorderThickness="0"
+                      ToolTip.Tip="Collapse / expand this list" />
+              <TextBlock Grid.Column="1" Text="{Binding Name}" FontWeight="Bold" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" />
+              <TextBlock Grid.Column="2" Text="{Binding CountText}" Opacity="0.6" VerticalAlignment="Center" />
+            </Grid>
+          </DataTemplate>
           <DataTemplate x:DataType="vm:TrackItemViewModel">
-            <Grid ColumnDefinitions="2*,*,*,60,80" Margin="2">
+            <Grid ColumnDefinitions="2*,*,*,60,80" Margin="{Binding Indent}">
               <TextBlock Grid.Column="0" Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
               <TextBlock Grid.Column="1" Text="{Binding Artist}" Opacity="0.75" TextTrimming="CharacterEllipsis" />
               <TextBlock Grid.Column="2" Text="{Binding Album}" Opacity="0.75" TextTrimming="CharacterEllipsis" />
@@ -32,16 +50,21 @@
               <TextBlock Grid.Column="4" Text="{Binding Stems}" Opacity="0.5" HorizontalAlignment="Right" />
             </Grid>
           </DataTemplate>
-        </ListBox.ItemTemplate>
+        </ListBox.DataTemplates>
         <ListBox.ContextMenu>
           <ContextMenu>
-            <MenuItem Header="Play" Command="{Binding PlayTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
-            <MenuItem Header="Delete…" Command="{Binding DeleteTrackCommand}" CommandParameter="{Binding SelectedTrack}" />
+            <MenuItem Header="Play" Command="{Binding PlayTrackCommand}" CommandParameter="{Binding SelectedTrack}" IsVisible="{Binding IsTrackSelected}" />
+            <MenuItem Header="Add to list…" Command="{Binding AddToListCommand}" CommandParameter="{Binding SelectedTrack}" IsVisible="{Binding IsTrackSelected}" />
+            <MenuItem Header="Remove from list" Command="{Binding RemoveFromListCommand}" CommandParameter="{Binding SelectedTrack}" IsVisible="{Binding SelectedTrackInList}" />
+            <MenuItem Header="Delete…" Command="{Binding DeleteTrackCommand}" CommandParameter="{Binding SelectedTrack}" IsVisible="{Binding IsTrackSelected}" />
+            <MenuItem Header="Play list" Command="{Binding PlayListCommand}" IsVisible="{Binding IsListSelected}" />
+            <MenuItem Header="Rename list…" Command="{Binding RenameListCommand}" IsVisible="{Binding IsListSelected}" />
+            <MenuItem Header="Delete list (keeps the songs)" Command="{Binding DeleteListCommand}" IsVisible="{Binding IsListSelected}" />
           </ContextMenu>
         </ListBox.ContextMenu>
       </ListBox>
 
-      <Border Grid.Row="1" IsVisible="{Binding Imports.Count}" Margin="0,8,0,0" Padding="8"
+      <Border Grid.Row="2" IsVisible="{Binding Imports.Count}" Margin="0,8,0,0" Padding="8"
               BorderThickness="1" BorderBrush="Gray" CornerRadius="4" MaxHeight="200">
         <DockPanel>
           <DockPanel DockPanel.Dock="Top">

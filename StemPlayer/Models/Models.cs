@@ -57,6 +57,16 @@ public class Track
     public List<BeatSegment> Segments { get; set; } = new();
 }
 
+/// <summary>A named, ordered group of tracks. A track belongs to at most one list. Playback cycles within a list.</summary>
+public class TrackList
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N");
+    public string Name { get; set; } = "";
+    public bool Collapsed { get; set; }
+    /// <summary>Track ids in play order.</summary>
+    public List<string> TrackIds { get; set; } = new();
+}
+
 public class AppSettings
 {
     public DeviceMode Device { get; set; } = DeviceMode.Gpu;

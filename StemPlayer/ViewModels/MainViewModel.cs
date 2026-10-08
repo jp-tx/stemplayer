@@ -23,7 +23,9 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     readonly DispatcherTimer _timer;
     bool _seeking;
 
-    public ObservableCollection<TrackItemViewModel> Tracks { get; } = new();
+    /// <summary>What the library list shows: list headers and tracks, already filtered/collapsed.</summary>
+    public ObservableCollection<LibraryRow> Rows { get; } = new();
+    readonly System.Collections.Generic.List<TrackItemViewModel> _items = new();
     public ObservableCollection<ImportItemViewModel> Imports { get; } = new();
     public ObservableCollection<string> Log { get; } = new();
 
@@ -37,7 +39,19 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         new(StemGroup.Other, "Everything else", "🎶"),
     };
 
-    [ObservableProperty] public partial TrackItemViewModel? SelectedTrack { get; set; }
+    [ObservableProperty] public partial LibraryRow? SelectedRow { get; set; }
+    public TrackItemViewModel? SelectedTrack => SelectedRow as TrackItemViewModel;
+    public bool IsTrackSelected => SelectedRow is TrackItemViewModel;
+    public bool IsListSelected => SelectedRow is ListHeaderViewModel;
+    public bool SelectedTrackInList => SelectedTrack is { } t && _library.ListOf(t.Track.Id) != null;
+
+    partial void OnSelectedRowChanged(LibraryRow? value)
+    {
+        OnPropertyChanged(nameof(SelectedTrack));
+        OnPropertyChanged(nameof(IsTrackSelected));
+        OnPropertyChanged(nameof(IsListSelected));
+        OnPropertyChanged(nameof(SelectedTrackInList));
+    }
     [ObservableProperty] public partial TrackItemViewModel? NowPlaying { get; set; }
     [ObservableProperty] public partial bool IsPlaying { get; set; }
     [ObservableProperty] public partial double Position { get; set; }
@@ -224,7 +238,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         var lib = new Library(SettingsStore.LibraryDir(Settings));
         var env = new PythonEnv(Settings);
         var imp = new ImportService(lib, Settings, env);
-        imp.TrackImported += t => Tracks.Add(new TrackItemViewModel(t));
+        imp.TrackImported += t => Dispatcher.UIThread.Post(() => { _items.Add(new TrackItemViewModel(t)); Rebuild(); });
         imp.LogLine += l => Dispatcher.UIThread.Post(() => { Log.Add(l); while (Log.Count > 500) Log.RemoveAt(0); });
         imp.ResolveConflict = ResolveConflictAsync;
         return (lib, env, imp);
@@ -252,9 +266,159 @@ public partial class MainViewModel : ViewModelBase, IDisposable
 
     void Reload()
     {
-        Tracks.Clear();
-        foreach (var t in _library.Tracks.OrderBy(t => t.Artist).ThenBy(t => t.Title))
-            Tracks.Add(new TrackItemViewModel(t));
+        _items.Clear();
+        _items.AddRange(_library.Tracks.Select(t => new TrackItemViewModel(t)));
+        Rebuild();
+    }
+
+    // ---------- lists + search ----------
+
+    partial void OnSearchChanged(string value) { OnPropertyChanged(nameof(HasSearch)); Rebuild(); }
+
+    bool Searching => !string.IsNullOrWhiteSpace(Search);
+
+    static readonly Avalonia.Thickness ListIndent = new(22, 0, 0, 0);
+
+    /// <summary>Recomputes the visible rows: lists first (each followed by its tracks unless collapsed),
+    /// then ungrouped tracks. While searching, only matching tracks show and collapsed lists are expanded.</summary>
+    void Rebuild()
+    {
+        var selTrack = (SelectedRow as TrackItemViewModel)?.Track.Id;
+        var selList = (SelectedRow as ListHeaderViewModel)?.List.Id;
+        var byId = _items.ToDictionary(i => i.Track.Id);
+        var terms = (Search ?? "").Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
+        bool Match(TrackItemViewModel i, string listName)
+        {
+            if (terms.Length == 0) return true;
+            var hay = $"{i.Title} {i.Artist} {i.Album} {listName}";
+            return terms.All(t => hay.Contains(t, StringComparison.OrdinalIgnoreCase));
+        }
+
+        var rows = new System.Collections.Generic.List<LibraryRow>();
+        foreach (var l in _library.Lists)
+        {
+            var members = l.TrackIds.Where(byId.ContainsKey).Select(id => byId[id]).ToList();
+            var shown = terms.Length == 0 ? members : members.Where(m => Match(m, l.Name)).ToList();
+            if (terms.Length > 0 && shown.Count == 0) continue;
+            rows.Add(new ListHeaderViewModel(l, members.Count, shown.Count, ToggleList));
+            foreach (var m in shown) m.Indent = ListIndent;
+            if (terms.Length > 0 || !l.Collapsed) rows.AddRange(shown);
+        }
+        foreach (var t in _items.Where(i => _library.ListOf(i.Track.Id) == null)
+                                .OrderBy(i => i.Artist).ThenBy(i => i.Title))
+        {
+            t.Indent = default;
+            if (Match(t, "")) rows.Add(t);
+        }
+
+        Rows.Clear();
+        foreach (var r in rows) Rows.Add(r);
+        SelectedRow = rows.FirstOrDefault(r =>
+            (r is TrackItemViewModel t && t.Track.Id == selTrack) ||
+            (r is ListHeaderViewModel h && h.List.Id == selList));
+        OnPropertyChanged(nameof(SelectedTrackInList));
+    }
+
+    /// <summary>Collapses/expands one list in place (no full rebuild, so the scroll position stays put).</summary>
+    void ToggleList(ListHeaderViewModel h)
+    {
+        if (Searching) return; // search forces lists open
+        var l = h.List;
+        l.Collapsed = !l.Collapsed;
+        _library.SaveLists();
+        h.Refresh();
+        int idx = Rows.IndexOf(h);
+        if (idx < 0) return;
+        if (l.Collapsed)
+            while (idx + 1 < Rows.Count && Rows[idx + 1] is TrackItemViewModel t && l.TrackIds.Contains(t.Track.Id))
+                Rows.RemoveAt(idx + 1);
+        else
+            foreach (var id in l.TrackIds)
+                if (_items.FirstOrDefault(i => i.Track.Id == id) is { } m) Rows.Insert(++idx, m);
+    }
+
+    public bool HasSearch => !string.IsNullOrEmpty(Search);
+
+    [RelayCommand] void ClearSearch() => Search = "";
+
+    [RelayCommand]
+    async Task NewList()
+    {
+        var name = await PromptListNameAsync("New list", "", offerExisting: false);
+        if (string.IsNullOrWhiteSpace(name) || _library.FindList(name) != null) return;
+        _library.CreateList(name);
+        Rebuild();
+    }
+
+    [RelayCommand]
+    async Task AddToList(TrackItemViewModel? t)
+    {
+        t ??= SelectedTrack;
+        if (t == null) return;
+        var name = await PromptListNameAsync($"Add \"{t.Title}\" to a list", _library.ListOf(t.Track.Id)?.Name ?? "", offerExisting: true);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        var list = _library.FindList(name) ?? _library.CreateList(name);
+        list.Collapsed = false;
+        _library.AddToList(list, t.Track);
+        Rebuild();
+    }
+
+    [RelayCommand]
+    void RemoveFromList(TrackItemViewModel? t)
+    {
+        t ??= SelectedTrack;
+        if (t == null) return;
+        _library.RemoveFromList(t.Track);
+        Rebuild();
+    }
+
+    [RelayCommand]
+    async Task RenameList(ListHeaderViewModel? h)
+    {
+        h ??= SelectedRow as ListHeaderViewModel;
+        if (h == null) return;
+        var name = await PromptListNameAsync("Rename list", h.List.Name, offerExisting: false);
+        if (string.IsNullOrWhiteSpace(name)) return;
+        if (_library.FindList(name) is { } other && other != h.List) return;
+        h.List.Name = name.Trim();
+        _library.SaveLists();
+        Rebuild();
+    }
+
+    [RelayCommand]
+    void DeleteList(ListHeaderViewModel? h)
+    {
+        h ??= SelectedRow as ListHeaderViewModel;
+        if (h == null) return;
+        _library.DeleteList(h.List); // the songs stay in the library
+        Rebuild();
+    }
+
+    [RelayCommand]
+    void PlayList(ListHeaderViewModel? h)
+    {
+        h ??= SelectedRow as ListHeaderViewModel;
+        if (h == null) return;
+        if (h.List.TrackIds.Select(id => _items.FirstOrDefault(i => i.Track.Id == id)).FirstOrDefault(i => i != null) is { } first)
+            PlayTrack(first);
+    }
+
+    Task<string?> PromptListNameAsync(string title, string initial, bool offerExisting) =>
+        Dispatcher.UIThread.InvokeAsync(async () =>
+        {
+            if (MainWindow == null) return null;
+            var win = new ListNameWindow(title, initial, offerExisting ? _library.Lists.Select(l => l.Name).ToArray() : Array.Empty<string>());
+            return await win.ShowDialog<string?>(MainWindow);
+        });
+
+    /// <summary>The order playback follows from <paramref name="t"/>: its list (which cycles), or all ungrouped songs.</summary>
+    System.Collections.Generic.List<TrackItemViewModel> PlayOrder(TrackItemViewModel t, out bool cycles)
+    {
+        var l = _library.ListOf(t.Track.Id);
+        cycles = l != null;
+        if (l != null)
+            return l.TrackIds.Select(id => _items.FirstOrDefault(i => i.Track.Id == id)).OfType<TrackItemViewModel>().ToList();
+        return _items.Where(i => _library.ListOf(i.Track.Id) == null).OrderBy(i => i.Artist).ThenBy(i => i.Title).ToList();
     }
 
     bool _autoSetupRunning;
@@ -360,7 +524,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         if (NowPlaying == t) StopPlayback();
         if (choice == DeleteChoice.Everything) _library.Remove(t.Track);
         else _library.RemoveEntryOnly(t.Track);
-        Tracks.Remove(t);
+        _items.Remove(t);
+        Rebuild();
     }
 
     // ---------- playback ----------
@@ -422,17 +587,26 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     [RelayCommand]
     void PlayNext()
     {
-        if (Tracks.Count == 0) return;
-        var i = NowPlaying == null ? -1 : Tracks.IndexOf(NowPlaying);
-        if (i + 1 < Tracks.Count) PlayTrack(Tracks[i + 1]);
+        if (NowPlaying == null)
+        {
+            if (Rows.OfType<TrackItemViewModel>().FirstOrDefault() is { } first) PlayTrack(first);
+            return;
+        }
+        var order = PlayOrder(NowPlaying, out var cycles);
+        var i = order.IndexOf(NowPlaying);
+        if (i < 0 || order.Count == 0) return;
+        if (i + 1 < order.Count) PlayTrack(order[i + 1]);
+        else if (cycles) PlayTrack(order[0]);
     }
 
     [RelayCommand]
     void PlayPrevious()
     {
-        if (Tracks.Count == 0) return;
-        var i = NowPlaying == null ? 1 : Tracks.IndexOf(NowPlaying);
-        if (Position > 3 || i <= 0) _output?.Seek(0); else PlayTrack(Tracks[i - 1]);
+        if (NowPlaying == null) return;
+        var order = PlayOrder(NowPlaying, out var cycles);
+        var i = order.IndexOf(NowPlaying);
+        if (Position > 3 || i < 0 || (i == 0 && !cycles)) _output?.Seek(0);
+        else PlayTrack(order[(i - 1 + order.Count) % order.Count]);
     }
 
     void StopPlayback()

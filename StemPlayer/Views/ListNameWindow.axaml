@@ -1,0 +1,16 @@
+<Window xmlns="https://github.com/avaloniaui"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        x:Class="StemPlayer.Views.ListNameWindow"
+        Title="List" Width="380" SizeToContent="Height" CanResize="False"
+        WindowStartupLocation="CenterOwner">
+  <StackPanel Margin="20" Spacing="12">
+    <TextBlock x:Name="PromptText" TextWrapping="Wrap" />
+    <TextBox x:Name="NameBox" PlaceholderText="List name" KeyDown="OnNameKeyDown" />
+    <TextBlock x:Name="ExistingLabel" Text="Or pick an existing list:" Opacity="0.75" />
+    <ListBox x:Name="ExistingList" MaxHeight="160" SelectionChanged="OnExistingChanged" DoubleTapped="OnExistingDoubleTapped" />
+    <StackPanel Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
+      <Button Content="Cancel" Click="OnCancel" />
+      <Button Content="OK" Click="OnOk" Classes="accent" />
+    </StackPanel>
+  </StackPanel>
+</Window>

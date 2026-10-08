@@ -10,6 +10,7 @@ public static class Paths
 
     public static string Settings => Path.Combine(AppData, "settings.json");
     public static string LibraryJson => Path.Combine(AppData, "library.json");
+    public static string ListsJson => Path.Combine(AppData, "lists.json");
     public static string CacheJson => Path.Combine(AppData, "cache.json");
     public static string Venv => Path.Combine(AppData, "venv");
     public static string Models => Directory.CreateDirectory(Path.Combine(AppData, "models")).FullName;
