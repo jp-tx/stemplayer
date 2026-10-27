@@ -24,6 +24,16 @@ public class BeatSegment
     public int DownbeatOffset { get; set; }
 }
 
+/// <summary>The loop region and editor mode remembered for one song. Whether the loop is switched on is
+/// deliberately not stored: every play of a song starts with looping off.</summary>
+public class LoopSettings
+{
+    public double? StartSeconds { get; set; }
+    public double? EndSeconds { get; set; }
+    public bool ByTime { get; set; }
+    public bool SplitBar { get; set; }
+}
+
 public class Track
 {
     public string Id { get; set; } = Guid.NewGuid().ToString("N");
@@ -55,6 +65,9 @@ public class Track
     /// <summary>Beat-stable runs with their own independently-anchored downbeat phase. See <see cref="BeatSegment"/>.
     /// Beats outside any segment (near a stop, or a short/unreliable run) have no bar/beat label.</summary>
     public List<BeatSegment> Segments { get; set; } = new();
+
+    /// <summary>Last loop region/mode the user set for this song; null until they edit one.</summary>
+    public LoopSettings? Loop { get; set; }
 }
 
 /// <summary>A named, ordered group of tracks. A track belongs to at most one list. Playback cycles within a list.</summary>

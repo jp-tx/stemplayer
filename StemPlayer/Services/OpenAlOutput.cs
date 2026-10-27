@@ -38,7 +38,13 @@ public sealed unsafe class OpenAlOutput : IDisposable
     volatile bool _stop;
     volatile bool _playing;
     volatile bool _ended;
-    float _volume = 1f;
+    // True once the pump has fed the last of the track to the device. Reset by Flush() (i.e. by any seek):
+    // if it were only reset later on the pump thread, a seek during the final ~0.2s tail would see an empty
+    // queue plus a stale flag and report a bogus end of track, advancing to the next song.
+    volatile bool _pumpDrained;
+    /// <summary>Master volume. Up to 1 it is OpenAL's source gain; above 1 the extra is applied in software
+    /// (with a soft limiter) when converting to 16-bit, since OpenAL does not reliably amplify past unity.</summary>
+    volatile float _volume = 1f;
 
     // Independent wall-clock pacing: a flaky device (observed after a Bluetooth output drops) can report
     // buffers as processed far faster than real time, which would otherwise race the mixer through the
@@ -71,7 +77,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
         _ctx = _alc.CreateContext(_device, null);
         _alc.MakeContextCurrent(_ctx);
         _source = _al.GenSource();
-        _al.SetSourceProperty(_source, SourceFloat.Gain, _volume);
+        _al.SetSourceProperty(_source, SourceFloat.Gain, Math.Min(_volume, 1f));
         _buffers = new uint[BufferCount];
         for (int i = 0; i < BufferCount; i++) _buffers[i] = _al.GenBuffer();
     }
@@ -135,14 +141,23 @@ public sealed unsafe class OpenAlOutput : IDisposable
         }
     }
 
-    public void SetVolume(float v) { _volume = v; lock (_lock) _al.SetSourceProperty(_source, SourceFloat.Gain, v); }
+    public void SetVolume(float v) { _volume = v; lock (_lock) _al.SetSourceProperty(_source, SourceFloat.Gain, Math.Min(v, 1f)); }
+
+    /// <summary>Linear below 0.8, then eases toward full scale so boosted peaks round off instead of hard-clipping.</summary>
+    static float SoftClip(float x)
+    {
+        float a = MathF.Abs(x);
+        if (a <= 0.8f) return x;
+        float y = 0.8f + 0.2f * MathF.Tanh((a - 0.8f) / 0.2f);
+        return x < 0 ? -y : y;
+    }
 
     public void Play()
     {
         if (_mixer == null) return;
         if (_ended) { _mixer.SeekFrames(0); _ended = false; }
         if (_thread is { IsAlive: true }) { _playing = true; lock (_lock) _al.SourcePlay(_source); return; }
-        _stop = false; _playing = true;
+        _stop = false; _playing = true; _pumpDrained = false;
         _thread = new Thread(Pump) { IsBackground = true, Name = "OpenAL pump" };
         _thread.Start();
     }
@@ -191,6 +206,7 @@ public sealed unsafe class OpenAlOutput : IDisposable
         _soundTouch.Clear();
         _stretchFifo.Clear();
         _mixerDrained = false;
+        _pumpDrained = false;
     }
 
     // Must hold _lock. Tops up _stretchFifo from the mixer via SoundTouch until there's enough for a
@@ -225,7 +241,6 @@ public sealed unsafe class OpenAlOutput : IDisposable
         var mixerBuf = new float[FramesPerBuffer * StemMixer.Channels];
         var stretchOutBuf = new float[FramesPerBuffer * StemMixer.Channels * 4];
         var shorts = new short[FramesPerBuffer * StemMixer.Channels];
-        bool drained = false;
         var deviceCheck = System.Diagnostics.Stopwatch.StartNew();
 
         while (!_stop)
@@ -249,19 +264,24 @@ public sealed unsafe class OpenAlOutput : IDisposable
                     _free.Enqueue(b);
                 }
 
-                while (_free.Count > 0 && !drained && _mixer != null)
+                while (_free.Count > 0 && !_pumpDrained && _mixer != null)
                 {
                     // If the device is consuming buffers faster than real time (seen when a Bluetooth
                     // output drops), stop handing it more audio until real time has actually caught up.
                     double aheadSeconds = (double)_framesReleased / StemMixer.SampleRate - _clock.Elapsed.TotalSeconds;
                     if (aheadSeconds > 0.5) break;
 
-                    if (!TopUpFifo(mixerBuf, stretchOutBuf)) { drained = true; break; }
+                    if (!TopUpFifo(mixerBuf, stretchOutBuf)) { _pumpDrained = true; break; }
                     int n = Math.Min(_stretchFifo.Count, FramesPerBuffer * StemMixer.Channels);
                     if (n <= 0) break; // not enough buffered yet; try again next pass
 
-                    for (int i = 0; i < n; i++)
-                        shorts[i] = (short)(Math.Clamp(_stretchFifo[i], -1f, 1f) * short.MaxValue);
+                    float boost = _volume;
+                    if (boost > 1f)
+                        for (int i = 0; i < n; i++)
+                            shorts[i] = (short)(Math.Clamp(SoftClip(_stretchFifo[i] * boost), -1f, 1f) * short.MaxValue);
+                    else
+                        for (int i = 0; i < n; i++)
+                            shorts[i] = (short)(Math.Clamp(_stretchFifo[i], -1f, 1f) * short.MaxValue);
                     _stretchFifo.RemoveRange(0, n);
 
                     uint buf = _free.Dequeue();
@@ -275,10 +295,10 @@ public sealed unsafe class OpenAlOutput : IDisposable
                 _al.GetSourceProperty(_source, GetSourceInteger.SourceState, out int state);
                 _al.GetSourceProperty(_source, GetSourceInteger.BuffersQueued, out int q);
                 if (q > 0 && state != (int)SourceState.Playing) _al.SourcePlay(_source);
-                if (drained && q == 0) { _playing = false; _ended = true; TrackEnded?.Invoke(); return; }
+                if (_pumpDrained && q == 0) { _playing = false; _ended = true; TrackEnded?.Invoke(); return; }
             }
             // A seek flushes everything (including _mixerDrained); allow reading again.
-            if (drained && _mixer != null && _mixer.PositionFrames < _mixer.TotalFrames) drained = false;
+            if (_pumpDrained && _mixer != null && _mixer.PositionFrames < _mixer.TotalFrames) _pumpDrained = false;
             Thread.Sleep(8);
         }
     }

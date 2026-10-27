@@ -184,6 +184,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     /// a loop edit should be felt immediately, not after the next wrap.</summary>
     public void ApplyLoopEditNow()
     {
+        SaveLoopSettings();
         if (LoopEnabled && IsPlaying && _output != null && LoopStartSeconds is { } s)
         {
             _output.Seek((long)(s * StemMixer.SampleRate));
@@ -209,8 +210,33 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         LoopGridChanged?.Invoke();
     }
 
-    partial void OnSplitBarChanged(bool value) { OnPropertyChanged(nameof(LoopSelectionText)); LoopGridChanged?.Invoke(); }
-    partial void OnLoopByTimeChanged(bool value) { OnPropertyChanged(nameof(LoopSelectionText)); LoopGridChanged?.Invoke(); }
+    bool _restoringLoop;
+
+    /// <summary>Stores the current loop region/mode on the playing song so it comes back next time.</summary>
+    void SaveLoopSettings()
+    {
+        if (_restoringLoop || NowPlaying?.Track is not { } t) return;
+        t.Loop = new LoopSettings { StartSeconds = LoopStartSeconds, EndSeconds = LoopEndSeconds, ByTime = LoopByTime, SplitBar = SplitBar };
+        _library.Save();
+    }
+
+    /// <summary>Loads the song's remembered loop region (or the default first bar), always with looping off.</summary>
+    void RestoreLoopSettings()
+    {
+        _restoringLoop = true;
+        try
+        {
+            LoopEnabled = false;
+            var l = NowPlaying?.Track.Loop;
+            if (l != null) { LoopByTime = l.ByTime; SplitBar = l.SplitBar; }
+            if (l is { StartSeconds: { } s, EndSeconds: { } e } && e > s) { LoopStartSeconds = s; LoopEndSeconds = e; LoopGridChanged?.Invoke(); }
+            else ResetLoopSelection();
+        }
+        finally { _restoringLoop = false; }
+    }
+
+    partial void OnSplitBarChanged(bool value) { OnPropertyChanged(nameof(LoopSelectionText)); LoopGridChanged?.Invoke(); SaveLoopSettings(); }
+    partial void OnLoopByTimeChanged(bool value) { OnPropertyChanged(nameof(LoopSelectionText)); LoopGridChanged?.Invoke(); SaveLoopSettings(); }
     partial void OnLoopEnabledChanged(bool value) => LoopGridChanged?.Invoke();
     partial void OnLoopStartSecondsChanged(double? value) => OnPropertyChanged(nameof(LoopSelectionText));
     partial void OnLoopEndSecondsChanged(double? value) => OnPropertyChanged(nameof(LoopSelectionText));
@@ -363,6 +389,37 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         Rebuild();
     }
 
+    public bool IsInList(TrackItemViewModel t) => _library.ListOf(t.Track.Id) != null;
+
+    /// <summary>True when dropping <paramref name="dragged"/> on <paramref name="target"/> would put it below the target
+    /// (moving down within the same list); otherwise it lands above. Used to place the drop indicator.</summary>
+    public bool DropLandsBelow(TrackItemViewModel dragged, TrackItemViewModel target) =>
+        _library.ListOf(target.Track.Id) is { } l && l == _library.ListOf(dragged.Track.Id) &&
+        l.TrackIds.IndexOf(dragged.Track.Id) < l.TrackIds.IndexOf(target.Track.Id);
+
+    /// <summary>Drag-and-drop: dropping on a list header appends to it, on a song in a list puts it in that
+    /// song's slot (reordering within a list), on an ungrouped song or empty space takes it out of its list.</summary>
+    public void DropTrack(TrackItemViewModel dragged, LibraryRow? target)
+    {
+        switch (target)
+        {
+            case ListHeaderViewModel h:
+                _library.MoveInList(h.List, dragged.Track, null);
+                break;
+            case TrackItemViewModel t when t != dragged && _library.ListOf(t.Track.Id) is { } l:
+                _library.MoveInList(l, dragged.Track, t.Track);
+                break;
+            case TrackItemViewModel t when t != dragged:
+            case null:
+                _library.RemoveFromList(dragged.Track);
+                break;
+            default:
+                return;
+        }
+        Rebuild();
+        SelectedRow = _items.Contains(dragged) ? dragged : null;
+    }
+
     [RelayCommand]
     void RemoveFromList(TrackItemViewModel? t)
     {
@@ -454,16 +511,62 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         }
     }
 
+    public ObservableCollection<YouTubeSearchResult> SearchResults { get; } = new();
+    [ObservableProperty] public partial bool ShowSearchResults { get; set; }
+    [ObservableProperty] public partial YouTubeSearchResult? SelectedSearchResult { get; set; }
+    System.Threading.CancellationTokenSource? _searchCts;
+
+    static bool LooksLikeUrl(string s) =>
+        !s.Contains(' ') && (s.StartsWith("http://", StringComparison.OrdinalIgnoreCase) || s.StartsWith("https://", StringComparison.OrdinalIgnoreCase)
+            || s.StartsWith("www.", StringComparison.OrdinalIgnoreCase) || s.Contains("youtu.be/") || s.Contains("youtube.com/"));
+
+    /// <summary>One box for both: a link is imported straight away, anything else is searched and shown as a dropdown.</summary>
     [RelayCommand]
-    void ImportYouTube()
+    async Task ImportYouTube()
     {
-        var url = YouTubeUrl.Trim();
-        if (url.Length == 0) return;
-        var item = new ImportItemViewModel { Title = url };
-        Imports.Add(item);
+        var text = YouTubeUrl.Trim();
+        if (text.Length == 0) return;
+        if (LooksLikeUrl(text))
+        {
+            ShowSearchResults = false;
+            YouTubeUrl = "";
+            StartYouTubeImport(text.StartsWith("www.", StringComparison.OrdinalIgnoreCase) ? "https://" + text : text, text);
+            return;
+        }
+
+        _searchCts?.Cancel();
+        var cts = _searchCts = new System.Threading.CancellationTokenSource();
+        Status = $"Searching YouTube for \"{text}\"...";
+        try
+        {
+            var results = await _importer.SearchYouTubeAsync(text, cts.Token);
+            if (cts.IsCancellationRequested) return;
+            SearchResults.Clear();
+            foreach (var r in results) SearchResults.Add(r);
+            ShowSearchResults = results.Count > 0;
+            Status = results.Count > 0 ? "" : $"No YouTube results for \"{text}\".";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception e) { if (!cts.IsCancellationRequested) Status = e.Message; }
+    }
+
+    partial void OnSelectedSearchResultChanged(YouTubeSearchResult? value)
+    {
+        if (value == null) return;
+        ShowSearchResults = false;
         YouTubeUrl = "";
+        StartYouTubeImport(value.Url, value.Title);
+        SelectedSearchResult = null;
+    }
+
+    void StartYouTubeImport(string url, string title)
+    {
+        var item = new ImportItemViewModel { Title = title };
+        Imports.Add(item);
         _ = _importer.ImportYouTubeAsync(url, item);
     }
+
+    [RelayCommand] void CloseSearchResults() => ShowSearchResults = false;
 
     [RelayCommand] void CancelImport(ImportItemViewModel item) => item.Cts.Cancel();
     [RelayCommand] void DismissImport(ImportItemViewModel item) { item.Cts.Cancel(); Imports.Remove(item); }
@@ -535,7 +638,8 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     {
         t ??= SelectedTrack;
         if (t == null) return;
-        NowPlaying = t; // -> OnNowPlayingChanged: resets TempoBpm and the loop selection
+        NowPlaying = t; // -> OnNowPlayingChanged: resets TempoBpm, restores this song's loop region (loop off)
+        LoopEnabled = false; // also covers replaying the same song, which doesn't raise OnNowPlayingChanged
         var start = LoopEnabled && LoopStartSeconds is { } s0 ? s0 : 0;
         ReloadMixer(_library.TrackDir(t.Track), t.Track, start, resumePlaying: true);
     }
@@ -565,7 +669,22 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         catch (Exception e) { Status = "Playback error: " + e.Message; }
     }
 
-    void OnEnded() => Dispatcher.UIThread.Post(() => { IsPlaying = false; PlayNext(); });
+    void OnEnded() => Dispatcher.UIThread.Post(() =>
+    {
+        // The Tick check can't catch a loop whose end is at (or past) the end of the song, because playback
+        // runs out first. If a loop is on, wrap it here instead of moving to the next song.
+        if (LoopEnabled && _output != null && LoopStartSeconds is { } s && LoopEndSeconds is { } e && e > s)
+        {
+            _output.Stop();
+            _output.Seek((long)(s * StemMixer.SampleRate));
+            Position = s;
+            _output.Play();
+            IsPlaying = true;
+            return;
+        }
+        IsPlaying = false;
+        PlayNext();
+    });
 
     [RelayCommand]
     void TogglePlay()
@@ -650,6 +769,7 @@ public partial class MainViewModel : ViewModelBase, IDisposable
     public void BeginSeek() => _seeking = true;
     public void EndSeek()
     {
+        if (!_seeking) return;
         _seeking = false;
         _output?.Seek((long)(Position * StemMixer.SampleRate));
     }
@@ -677,10 +797,16 @@ public partial class MainViewModel : ViewModelBase, IDisposable
         OnPropertyChanged(nameof(TempoText));
         OnPropertyChanged(nameof(MeterText));
         OnPropertyChanged(nameof(HasMeter));
-        ResetLoopSelection();
+        RestoreLoopSettings();
     }
     partial void OnIsPlayingChanged(bool value) => OnPropertyChanged(nameof(PlayGlyph));
-    partial void OnMasterVolumeChanged(double value) => _output?.SetVolume((float)value);
+    partial void OnMasterVolumeChanged(double value)
+    {
+        _output?.SetVolume((float)value);
+        OnPropertyChanged(nameof(MasterVolumeText));
+    }
+
+    public string MasterVolumeText => $"{MasterVolume * 100:0}%";
 
     public void Dispose() { _timer.Stop(); _output?.Dispose(); }
 }

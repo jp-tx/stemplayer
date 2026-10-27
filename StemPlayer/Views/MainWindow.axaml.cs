@@ -8,6 +8,7 @@ using Avalonia.Input;
 using Avalonia.Interactivity;
 using Avalonia.Media;
 using Avalonia.Platform.Storage;
+using Avalonia.VisualTree;
 using StemPlayer.Models;
 using StemPlayer.ViewModels;
 
@@ -27,7 +28,15 @@ public partial class MainWindow : Window
         // Slider consumes pointer events; listen even when handled so we know when the user is scrubbing.
         SeekSlider.AddHandler(PointerPressedEvent, (_, _) => Vm?.BeginSeek(), RoutingStrategies.Tunnel, handledEventsToo: true);
         SeekSlider.AddHandler(PointerReleasedEvent, (_, _) => Vm?.EndSeek(), RoutingStrategies.Tunnel, handledEventsToo: true);
+        // If the pointer is captured away mid-drag the release never arrives; don't leave the position timer (and so looping) paused.
+        SeekSlider.AddHandler(PointerCaptureLostEvent, (_, _) => Vm?.EndSeek(), RoutingStrategies.Tunnel, handledEventsToo: true);
         Closing += (_, _) => Vm?.Dispose();
+        LibraryList.AddHandler(PointerPressedEvent, OnLibraryPressed, RoutingStrategies.Tunnel, handledEventsToo: true);
+        LibraryList.AddHandler(PointerMovedEvent, OnLibraryMoved, RoutingStrategies.Tunnel, handledEventsToo: true);
+        LibraryList.AddHandler(PointerReleasedEvent, (_, _) => _pressedTrack = null, RoutingStrategies.Tunnel, handledEventsToo: true);
+        LibraryList.AddHandler(DragDrop.DragOverEvent, OnLibraryDragOver);
+        LibraryList.AddHandler(DragDrop.DragLeaveEvent, (_, _) => SetDropIndicator(null, null));
+        LibraryList.AddHandler(DragDrop.DropEvent, OnLibraryDrop);
         // Track Shift for the fader "move all the others" gesture. Pointer events also carry modifiers, which
         // keeps this correct if Shift was pressed while another control had focus.
         AddHandler(KeyDownEvent, (_, e) => SetShift(e.KeyModifiers), RoutingStrategies.Tunnel, handledEventsToo: true);
@@ -46,6 +55,79 @@ public partial class MainWindow : Window
         // (covers a window resize) if a redraw was requested since the last one.
         DataContextChanged += (_, _) => { if (Vm != null) Vm.LoopGridChanged += () => _loopDirty = true; };
         LayoutUpdated += (_, _) => { if (_loopDirty) { _loopDirty = false; RedrawLoop(); } };
+    }
+
+    // ---------- drag a song onto a list ----------
+
+    TrackItemViewModel? _pressedTrack, _draggedTrack;
+    PointerPressedEventArgs? _pressArgs;
+    Point _pressPoint;
+
+    static LibraryRow? RowAt(object? source) =>
+        (source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true)?.DataContext as LibraryRow;
+
+    void OnLibraryPressed(object? sender, PointerPressedEventArgs e)
+    {
+        _pressedTrack = null;
+        if (!e.GetCurrentPoint(LibraryList).Properties.IsLeftButtonPressed) return;
+        if (RowAt(e.Source) is TrackItemViewModel t)
+        {
+            _pressedTrack = t; _pressArgs = e; _pressPoint = e.GetPosition(LibraryList);
+        }
+    }
+
+    async void OnLibraryMoved(object? sender, PointerEventArgs e)
+    {
+        if (_pressedTrack == null || _pressArgs == null || _draggedTrack != null) return;
+        if (!e.GetCurrentPoint(LibraryList).Properties.IsLeftButtonPressed) { _pressedTrack = null; return; }
+        var d = e.GetPosition(LibraryList) - _pressPoint;
+        if (Math.Abs(d.X) < 8 && Math.Abs(d.Y) < 8) return;
+
+        _draggedTrack = _pressedTrack;
+        var args = _pressArgs;
+        _pressedTrack = null; _pressArgs = null;
+        var data = new DataTransfer();
+        data.Add(DataTransferItem.CreateText(_draggedTrack.Title));
+        try { await DragDrop.DoDragDropAsync(args, data, DragDropEffects.Move); }
+        finally { _draggedTrack = null; SetDropIndicator(null, null); }
+    }
+
+    void OnLibraryDragOver(object? sender, DragEventArgs e)
+    {
+        e.DragEffects = _draggedTrack != null ? DragDropEffects.Move : DragDropEffects.None;
+        e.Handled = true;
+
+        // Show where the song will land: tint a list header (append), or draw a line above/below a song in a list.
+        var item = (e.Source as Visual)?.FindAncestorOfType<ListBoxItem>(includeSelf: true);
+        string? cls = null;
+        if (_draggedTrack != null && Vm != null && item?.DataContext is { } row)
+            cls = row switch
+            {
+                ListHeaderViewModel => "drop-into",
+                TrackItemViewModel t when t != _draggedTrack && Vm.IsInList(t) =>
+                    Vm.DropLandsBelow(_draggedTrack, t) ? "drop-below" : "drop-above",
+                _ => null,
+            };
+        SetDropIndicator(cls == null ? null : item, cls);
+    }
+
+    ListBoxItem? _dropItem;
+    string? _dropClass;
+
+    void SetDropIndicator(ListBoxItem? item, string? cls)
+    {
+        if (item == _dropItem && cls == _dropClass) return;
+        if (_dropItem != null && _dropClass != null) _dropItem.Classes.Remove(_dropClass);
+        _dropItem = item; _dropClass = cls;
+        if (item != null && cls != null) item.Classes.Add(cls);
+    }
+
+    void OnLibraryDrop(object? sender, DragEventArgs e)
+    {
+        e.Handled = true;
+        SetDropIndicator(null, null);
+        if (_draggedTrack == null || Vm == null) return;
+        Vm.DropTrack(_draggedTrack, RowAt(e.Source));
     }
 
     void SetShift(KeyModifiers m) { if (Vm != null) Vm.ShiftHeld = m.HasFlag(KeyModifiers.Shift); }
@@ -95,6 +177,7 @@ public partial class MainWindow : Window
     void OnUrlKeyDown(object? sender, KeyEventArgs e)
     {
         if (e.Key == Key.Enter) Vm?.ImportYouTubeCommand.Execute(null);
+        else if (e.Key == Key.Escape) Vm?.CloseSearchResultsCommand.Execute(null);
     }
 
     // ---------- loop timeline ----------

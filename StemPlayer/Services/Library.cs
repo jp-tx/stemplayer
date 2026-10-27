@@ -92,6 +92,20 @@ public class Library
         }
     }
 
+    /// <summary>Moves the track into <paramref name="list"/> and into the slot <paramref name="before"/> occupied
+    /// (so the dragged song takes that position, whichever direction it came from). Appends if <paramref name="before"/> is null.</summary>
+    public void MoveInList(TrackList list, Track t, Track? before)
+    {
+        lock (_lock)
+        {
+            int slot = before == null ? -1 : list.TrackIds.IndexOf(before.Id);
+            foreach (var l in Lists) l.TrackIds.Remove(t.Id);
+            if (slot < 0 || slot > list.TrackIds.Count) list.TrackIds.Add(t.Id);
+            else list.TrackIds.Insert(slot, t.Id);
+            SaveLists();
+        }
+    }
+
     public void RemoveFromList(Track t)
     {
         lock (_lock) { foreach (var l in Lists) l.TrackIds.Remove(t.Id); SaveLists(); }

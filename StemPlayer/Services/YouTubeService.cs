@@ -1,6 +1,8 @@
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
+using System.Text.Json;
 using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
@@ -8,6 +10,13 @@ using System.Threading.Tasks;
 namespace StemPlayer.Services;
 
 public record YouTubeResult(string Mp3Path, string Title, string Artist, double Duration);
+
+public record YouTubeSearchResult(string Title, string Channel, string Url, double Duration)
+{
+    public string DurationText => Duration > 0
+        ? (Duration >= 3600 ? TimeSpan.FromSeconds(Duration).ToString(@"h\:mm\:ss") : TimeSpan.FromSeconds(Duration).ToString(@"m\:ss"))
+        : "";
+}
 
 /// <summary>Downloads a YouTube URL as an mp3 using yt-dlp (run from the managed Python env).</summary>
 public class YouTubeService
@@ -58,5 +67,43 @@ public class YouTubeService
         file ??= Path.Combine(outDir, "source.mp3");
         if (!File.Exists(file)) throw new FileNotFoundException("yt-dlp did not produce an mp3", file);
         return new YouTubeResult(file, title ?? "YouTube import", artist ?? "", duration);
+    }
+
+    /// <summary>Searches YouTube by keywords via yt-dlp (metadata only, no download).</summary>
+    public async Task<List<YouTubeSearchResult>> SearchAsync(string query, int count, CancellationToken ct)
+    {
+        var results = new List<YouTubeSearchResult>();
+        var other = new List<string>();
+        static string Str(JsonElement e, string name) =>
+            e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() ?? "" : "";
+
+        int code = await ProcessRunner.RunAsync(_env.Python,
+            new[] { "-m", "yt_dlp", "--no-warnings", "--flat-playlist", "--dump-json", $"ytsearch{count}:{query}" },
+            line =>
+            {
+                if (line.StartsWith('{'))
+                {
+                    try
+                    {
+                        using var doc = JsonDocument.Parse(line);
+                        var r = doc.RootElement;
+                        var id = Str(r, "id");
+                        if (id.Length == 0) return;
+                        var url = Str(r, "url");
+                        if (!url.StartsWith("http")) url = "https://www.youtube.com/watch?v=" + id;
+                        var channel = Str(r, "channel");
+                        if (channel.Length == 0) channel = Str(r, "uploader");
+                        double dur = r.TryGetProperty("duration", out var d) && d.ValueKind == JsonValueKind.Number ? d.GetDouble() : 0;
+                        lock (results) results.Add(new YouTubeSearchResult(Str(r, "title"), channel, url, dur));
+                    }
+                    catch (JsonException) { }
+                }
+                else lock (other) other.Add(line);
+            }, ct: ct);
+
+        if (code != 0 && results.Count == 0)
+            throw new InvalidOperationException("YouTube search failed (is yt-dlp installed? see Options > Set up Python environment). "
+                + (other.Count > 0 ? other[^1] : ""));
+        return results;
     }
 }

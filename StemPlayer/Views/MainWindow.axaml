@@ -1,18 +1,55 @@
 <Window xmlns="https://github.com/avaloniaui"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:vm="using:StemPlayer.ViewModels"
+        xmlns:svc="using:StemPlayer.Services"
         x:Class="StemPlayer.Views.MainWindow"
         x:DataType="vm:MainViewModel"
         Title="StemPlayer" Width="1100" Height="780" MinWidth="820" MinHeight="600">
+
+  <Window.Styles>
+    <!-- Drag-and-drop feedback on library rows; set from code-behind while a song is dragged over them. -->
+    <Style Selector="ListBoxItem.drop-into /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="Background" Value="#662E8BFF" />
+    </Style>
+    <Style Selector="ListBoxItem.drop-above /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="#FF2E8BFF" />
+      <Setter Property="BorderThickness" Value="0,3,0,0" />
+    </Style>
+    <Style Selector="ListBoxItem.drop-below /template/ ContentPresenter#PART_ContentPresenter">
+      <Setter Property="BorderBrush" Value="#FF2E8BFF" />
+      <Setter Property="BorderThickness" Value="0,0,0,3" />
+    </Style>
+  </Window.Styles>
 
   <Grid RowDefinitions="Auto,*,Auto,Auto">
 
     <!-- Toolbar -->
     <Grid Grid.Row="0" ColumnDefinitions="Auto,*,Auto,Auto,Auto" Margin="12" ColumnSpacing="8">
       <Button Grid.Column="0" Content="＋ Import files…" Click="OnImportFiles" />
-      <TextBox Grid.Column="1" PlaceholderText="Paste a YouTube link to import as MP3 and split…"
+      <TextBox x:Name="UrlBox" Grid.Column="1" PlaceholderText="Paste a YouTube link to import and split, or type keywords to search YouTube…"
                Text="{Binding YouTubeUrl}" KeyDown="OnUrlKeyDown" />
-      <Button Grid.Column="2" Content="Import from YouTube" Command="{Binding ImportYouTubeCommand}" />
+      <Popup PlacementTarget="{Binding #UrlBox}" Placement="Bottom" IsLightDismissEnabled="True"
+             IsOpen="{Binding ShowSearchResults, Mode=TwoWay}">
+        <Border Width="{Binding #UrlBox.Bounds.Width}" MaxHeight="380" CornerRadius="4" BorderThickness="1"
+                Background="{DynamicResource MenuFlyoutPresenterBackground}"
+                BorderBrush="{DynamicResource MenuFlyoutPresenterBorderBrush}">
+          <ListBox ItemsSource="{Binding SearchResults}" SelectedItem="{Binding SelectedSearchResult}">
+            <ListBox.ItemTemplate>
+              <DataTemplate x:DataType="svc:YouTubeSearchResult">
+                <Grid ColumnDefinitions="*,Auto" ColumnSpacing="12" Margin="2">
+                  <StackPanel Grid.Column="0">
+                    <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis" />
+                    <TextBlock Text="{Binding Channel}" Opacity="0.65" FontSize="12" TextTrimming="CharacterEllipsis" />
+                  </StackPanel>
+                  <TextBlock Grid.Column="1" Text="{Binding DurationText}" Opacity="0.75" VerticalAlignment="Center" />
+                </Grid>
+              </DataTemplate>
+            </ListBox.ItemTemplate>
+          </ListBox>
+        </Border>
+      </Popup>
+      <Button Grid.Column="2" Content="Import / Search" Command="{Binding ImportYouTubeCommand}"
+              ToolTip.Tip="A YouTube link is imported; anything else searches YouTube" />
       <Button Grid.Column="3" Content="⬆ Update" Command="{Binding UpdateCommand}" IsEnabled="{Binding !IsUpdating}"
               ToolTip.Tip="Download and install the newest StemPlayer release" />
       <Button Grid.Column="4" Content="⚙ Options" Click="OnOptions" />
@@ -29,7 +66,7 @@
                 ToolTip.Tip="Create a list. Right-click a song > Add to list… to fill it; playback cycles through a list." />
       </Grid>
 
-      <ListBox Grid.Row="1" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
+      <ListBox x:Name="LibraryList" Grid.Row="1" DragDrop.AllowDrop="True" ItemsSource="{Binding Rows}" SelectedItem="{Binding SelectedRow}"
                DoubleTapped="OnTrackDoubleTapped" KeyDown="OnTrackListKeyDown">
         <ListBox.DataTemplates>
           <DataTemplate x:DataType="vm:ListHeaderViewModel">
@@ -106,7 +143,9 @@
           </StackPanel>
           <StackPanel Grid.Column="2" Orientation="Horizontal" HorizontalAlignment="Right" Spacing="8">
             <TextBlock Text="Master" VerticalAlignment="Center" />
-            <Slider Minimum="0" Maximum="1" Value="{Binding MasterVolume}" Width="120" />
+            <Slider Minimum="0" Maximum="4" Value="{Binding MasterVolume}" Width="140"
+                    ToolTip.Tip="Master volume. Above 100% adds gain for quiet recordings (soft-limited to avoid harsh clipping)." />
+            <TextBlock Text="{Binding MasterVolumeText}" MinWidth="40" VerticalAlignment="Center" />
             <Button Content="Reset faders" Command="{Binding ResetFadersCommand}" />
           </StackPanel>
         </Grid>

@@ -58,6 +58,9 @@ public class ImportService
             await Split(track, src, dir, item, 0.02, ct);
         });
 
+    public Task<System.Collections.Generic.List<YouTubeSearchResult>> SearchYouTubeAsync(string query, System.Threading.CancellationToken ct) =>
+        _youtube.SearchAsync(query, 8, ct);
+
     public Task ImportYouTubeAsync(string url, ImportItemViewModel item) =>
         Run(item, _ => Task.FromResult("yt:" + url.Trim()), async (track, dir, ct) =>
         {
